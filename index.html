@@ -57,11 +57,18 @@
     height: 0;
   }
 
-  label, summary {
+  label {
     cursor: pointer;
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  summary {
+    cursor: pointer;
+    touch-action: pan-y;
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   /* Header */
