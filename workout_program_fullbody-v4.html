@@ -1,0 +1,2182 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Full Body 3x — Pro Technique & Universal Gym (iOS Ready)</title>
+<style>
+  :root {
+    --bg-main: #0a0d14;
+    --bg-header: #111622;
+    --bg-card: #151c28;
+    --bg-subcard: #0d121c;
+    --accent: #3b82f6;
+    --accent-soft: rgba(59, 130, 246, 0.16);
+    --accent-green: #10b981;
+    --accent-amber: #f59e0b;
+    --accent-purple: #8b5cf6;
+    --accent-cyan: #06b6d4;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --border: #222d3d;
+    --border-light: #2d3b4f;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html, body {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-family: var(--font);
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+
+  body {
+    padding-bottom: calc(85px + env(safe-area-inset-bottom, 16px));
+  }
+
+  /* Pure CSS State Management (Zero-JS Engine) */
+  input.state-radio {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+  }
+
+  label, summary {
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Header */
+  header {
+    background-color: var(--bg-header);
+    border-bottom: 1px solid var(--border);
+    padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
+  .header-container {
+    max-width: 880px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-block h1 {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #60a5fa;
+  }
+
+  .logo-block p {
+    font-size: 0.73rem;
+    color: var(--text-secondary);
+  }
+
+  .badge-recomp {
+    background: rgba(16, 185, 129, 0.14);
+    color: var(--accent-green);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  /* Main Container */
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 14px;
+  }
+
+  /* Tabs Switching Logic */
+  .section-tab {
+    display: none;
+  }
+
+  #nav-workout:checked ~ main #tab-workout,
+  #nav-strategy:checked ~ main #tab-strategy,
+  #nav-recomp:checked ~ main #tab-recomp,
+  #nav-progression:checked ~ main #tab-progression {
+    display: block;
+  }
+
+  /* Bottom Navigation Bar */
+  .nav-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: var(--bg-header);
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-around;
+    padding: 6px 8px calc(10px + env(safe-area-inset-bottom, 8px));
+    z-index: 100;
+  }
+
+  .nav-btn {
+    flex: 1;
+    max-width: 180px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 6px 4px;
+    border-radius: var(--radius-sm);
+    text-align: center;
+  }
+
+  .nav-btn svg {
+    width: 21px;
+    height: 21px;
+    margin-bottom: 3px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+  }
+
+  #nav-workout:checked ~ .nav-bar label[for="nav-workout"],
+  #nav-strategy:checked ~ .nav-bar label[for="nav-strategy"],
+  #nav-recomp:checked ~ .nav-bar label[for="nav-recomp"],
+  #nav-progression:checked ~ .nav-bar label[for="nav-progression"] {
+    color: #60a5fa;
+    background-color: var(--accent-soft);
+  }
+
+  /* Day Selector Pill Group */
+  .pill-group {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+    background-color: #10141d;
+    padding: 4px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+  }
+
+  .pill-btn {
+    flex: 1;
+    text-align: center;
+    padding: 10px 6px;
+    color: var(--text-muted);
+    font-weight: 700;
+    font-size: 0.85rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .day-content {
+    display: none;
+  }
+
+  #day-a-radio:checked ~ .pill-group label[for="day-a-radio"],
+  #day-b-radio:checked ~ .pill-group label[for="day-b-radio"],
+  #day-c-radio:checked ~ .pill-group label[for="day-c-radio"] {
+    background-color: var(--accent);
+    color: #ffffff;
+  }
+
+  #day-a-radio:checked ~ #day-a-panel,
+  #day-b-radio:checked ~ #day-b-panel,
+  #day-c-radio:checked ~ #day-c-panel {
+    display: block;
+  }
+
+  /* Cards */
+  .card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  .card-highlight { border-left: 4px solid var(--accent); }
+  .card-green { border-left: 4px solid var(--accent-green); }
+  .card-amber { border-left: 4px solid var(--accent-amber); }
+  .card-purple { border-left: 4px solid var(--accent-purple); }
+
+  h2 {
+    font-size: 1.08rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+    color: #ffffff;
+  }
+
+  h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #93c5fd;
+    margin: 12px 0 6px;
+  }
+
+  p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+
+  ul, ol {
+    margin-left: 18px;
+    margin-bottom: 10px;
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+  }
+
+  li { margin-bottom: 6px; }
+  strong { color: #ffffff; }
+
+  /* Native Exercise Accordions */
+  details.exercise-item {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  summary.exercise-header {
+    padding: 14px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+  }
+
+  summary.exercise-header::-webkit-details-marker {
+    display: none;
+  }
+
+  .exercise-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-right: 8px;
+  }
+
+  .exercise-number {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #60a5fa;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .exercise-name {
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .exercise-sub-alt {
+    font-size: 0.76rem;
+    color: #fbbf24;
+    font-weight: 500;
+  }
+
+  .exercise-params {
+    display: flex;
+    gap: 6px;
+    margin-top: 5px;
+    flex-wrap: wrap;
+  }
+
+  .param-badge {
+    background-color: #1c2433;
+    border: 1px solid #2d384d;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    color: #cbd5e1;
+    font-weight: 600;
+  }
+
+  .param-badge.sets { color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); }
+  .param-badge.rir { color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
+  .param-badge.axial { color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
+
+  .chevron {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    stroke: var(--text-muted);
+    stroke-width: 2.5;
+    fill: none;
+    transition: transform 0.15s ease;
+  }
+
+  details[open] > summary .chevron {
+    transform: rotate(180deg);
+    stroke: #60a5fa;
+  }
+
+  .exercise-body {
+    padding: 0 15px 15px;
+    border-top: 1px solid var(--border);
+    background-color: var(--bg-subcard);
+  }
+
+  /* Nested Expandable Sub-Blocks */
+  details.sub-detail {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    margin-top: 10px;
+    overflow: hidden;
+  }
+
+  summary.sub-header {
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    list-style: none;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #93c5fd;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background-color: rgba(255, 255, 255, 0.02);
+  }
+
+  summary.sub-header::-webkit-details-marker {
+    display: none;
+  }
+
+  summary.sub-header.alt-color {
+    color: #fbbf24;
+  }
+
+  summary.sub-header.tech-color {
+    color: #67e8f9;
+  }
+
+  .sub-icon {
+    width: 16px;
+    height: 16px;
+    stroke: var(--text-muted);
+    stroke-width: 2.5;
+    fill: none;
+    transition: transform 0.15s ease;
+  }
+
+  details.sub-detail[open] > summary .sub-icon {
+    transform: rotate(180deg);
+    stroke: currentColor;
+  }
+
+  .sub-body {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.83rem;
+  }
+
+  /* Setup & Execution Grid Inside Tech Block */
+  .tech-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .tech-item {
+    background-color: rgba(0, 0, 0, 0.2);
+    padding: 8px 10px;
+    border-radius: 6px;
+    border-left: 2px solid var(--accent);
+  }
+
+  .tech-item strong {
+    color: #93c5fd;
+    display: block;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 2px;
+  }
+
+  .tech-item p {
+    margin-bottom: 0;
+    color: #e2e8f0;
+    font-size: 0.81rem;
+  }
+
+  .tech-item.feel { border-left-color: var(--accent-green); }
+  .tech-item.feel strong { color: #86efac; }
+
+  .tech-item.avoid { border-left-color: #ef4444; }
+  .tech-item.avoid strong { color: #fca5a5; }
+
+  .tech-item.mistake { border-left-color: var(--accent-amber); }
+  .tech-item.mistake strong { color: #fde68a; }
+
+  /* Alternative Block Inside Sub-Detail */
+  .alt-item {
+    margin-bottom: 8px;
+    color: #f1f5f9;
+    font-size: 0.82rem;
+  }
+
+  .alt-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .alt-tag {
+    display: inline-block;
+    background-color: rgba(245, 158, 11, 0.2);
+    color: #fde68a;
+    font-weight: 700;
+    font-size: 0.69rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-right: 4px;
+  }
+
+  .cue-box {
+    background-color: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #a7f3d0;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    margin-top: 10px;
+    font-weight: 600;
+    font-size: 0.83rem;
+  }
+
+  /* Table styling */
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 10px 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    text-align: left;
+  }
+
+  th {
+    background-color: #1a2232;
+    color: #93c5fd;
+    padding: 9px 11px;
+    font-weight: 700;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 9px 11px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* Steps */
+  .step-card {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 10px;
+    background-color: #111621;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+
+  .step-num {
+    background-color: var(--accent);
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .step-content h4 {
+    font-size: 0.9rem;
+    color: #fff;
+    margin-bottom: 3px;
+  }
+
+  .step-content p {
+    font-size: 0.82rem;
+    margin-bottom: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- PURE CSS MAIN NAVIGATION RADIOS -->
+<input type="radio" name="main-nav" id="nav-workout" class="state-radio" checked>
+<input type="radio" name="main-nav" id="nav-strategy" class="state-radio">
+<input type="radio" name="main-nav" id="nav-recomp" class="state-radio">
+<input type="radio" name="main-nav" id="nav-progression" class="state-radio">
+
+<header>
+  <div class="header-container">
+    <div class="logo-block">
+      <h1>FULL BODY 3X // PRO</h1>
+      <p>Повна біомеханічна техніка • Заміни для залу • iOS Ready</p>
+    </div>
+    <div class="badge-recomp">Zero-JS 120fps</div>
+  </div>
+</header>
+
+<main>
+  <!-- ==========================================
+       TAB 1: WORKOUT PROGRAM (DAYS A, B, C)
+       ========================================== -->
+  <section id="tab-workout" class="section-tab">
+
+    <!-- PURE CSS DAY SWITCHER RADIOS -->
+    <input type="radio" name="day-nav" id="day-a-radio" class="state-radio" checked>
+    <input type="radio" name="day-nav" id="day-b-radio" class="state-radio">
+    <input type="radio" name="day-nav" id="day-c-radio" class="state-radio">
+
+    <div class="pill-group">
+      <label for="day-a-radio" class="pill-btn">ДЕНЬ A</label>
+      <label for="day-b-radio" class="pill-btn">ДЕНЬ B</label>
+      <label for="day-c-radio" class="pill-btn">ДЕНЬ C</label>
+    </div>
+
+    <!-- ==========================================
+         DAY A PANEL
+         ========================================== -->
+    <div id="day-a-panel" class="day-content">
+      <div class="card card-green" style="padding:12px 14px;">
+        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня A:</strong> Верх спини (трапеції/задня дельта) + Квадрицепс + Верх грудних (30°) + Задня поверхня стегна + Трицепс + Плоский живіт (Dead Bug).</p>
+      </div>
+
+      <!-- A1 -->
+      <details class="exercise-item" open>
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A1 • Верхня спина</span>
+            <span class="exercise-name">Chest-Supported Machine Row (Wide Grip)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Тяга гантелей на лаві 30° або Широка тяга в нижньому блоці</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <!-- Detailed Technique Accordion -->
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Seat height: подушка впирається в середину грудини (нижче ключиць).<br>• Feet: стопи щільно на упорах, коліна напівзігнуті (не штовхатися ногами так, щоб відривати таз).<br>• Pelvis & Ribs: таз на сидінні, ребра опущені, грудина щільно притиснута.<br>• Grip & Scapula: хват пронований або кутовий ширше плечей; на старті дозволь лопаткам розійтися вперед без згинання хребта.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Початок: активне зведення та задній нахил лопаток.<br>• Траєкторія: лікті рухаються назад під кутом 45–60° до лінії тулуба.<br>• ROM & Pause: тягни до лінії спини, пауза 1 с у повному скороченні.<br>• Eccentric: 3 секунди контрольованого повернення вперед.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel (Що ти маєш відчувати)</strong>
+                  <p>Глибоке потужне скорочення між лопатками (середня та нижня трапеція, ромбоподібні) та в задній дельті.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid (Чого уникати)</strong>
+                  <p>Підйому плечей до вух (шраг верхньою трапецією), відриву грудей від подушки (перерозгинання спини) та висування підборіддя вперед назустріч тренажеру.</p>
+                </div>
+                <div class="tech-item mistake">
+                  <strong>Common mistakes (Типові помилки)</strong>
+                  <p>Надмірна вага, через яку лікті не доходять до лінії корпусу, а голова тягнеться вперед.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <!-- Alternative Accordion -->
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо немає тренажера або зайнято)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Є в кожному залі)</span> <strong>Incline Bench Chest-Supported DB Row (30° лава):</strong> Ляж грудьми на похилу лаву 30–45°, візьми гантелі по 16–24 кг. Тягни з розведенням ліктів під 45–60° і паузою 1–2 с у верхній точці. Осьове навантаження: 0/10!</div>
+              <div class="alt-item"><span class="alt-tag">План В (Нижній блок)</span> <strong>Seated Wide-Grip Cable Row (до грудини):</strong> Сидячи у нижньому блоці з довгою широкою рукояткою. Корпус строго вертикальний (без розгойдування), тягни рукоятку до низу грудини, лікті під 45–60°.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Грудина в подушку, лікті під 45–60°, зведи лопатки»</div>
+        </div>
+      </details>
+
+      <!-- A2 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A2 • Квадрицепс & Сідниці</span>
+            <span class="exercise-name">Belt Squat (Присідання з поясом)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Жим ногами 45° (Leg Press) або Belt Squat у кросовері</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">3 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Belt: одягни пояс низько на таз/сідниці (на рівень великих вертлюгів, <strong>ніколи не на талію!</strong>).<br>• Feet: стопи на ширині плечей, носки розвернуті на 15–20°, карабін прямо між стопами.<br>• Spine: хребет розвантажений і вертикальний, руками тримайся за передні поручні на рівні грудей.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Одночасно згинай коліна і кульшові суглоби, опускаючись між п'ятами.<br>• Коліна рухаються по лінії носків до паралелі або глибше.<br>• Потужний підйом угору всією стопою без «замикання» колін.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке навантаження у квадрицепсах та сідницях при відчутті абсолютної невагомості у спині.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Кріплення ременя на поперек, сильного нахилу тулуба вперед.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо немає Belt Squat)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Є в 100% залів)</span> <strong>45° Leg Press (Класичний жим ногами):</strong> Навішуй млинці по 20–25 кг до будь-якої ваги (150–250 кг). Стопи посередині платформи. Опускай глибоко, але не відривай крижі від сидіння!</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Cable Belt Squat:</strong> Звичайний пояс для обтяжень пристебни до нижнього блоку кросовера і стань на два степ-блоки.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Пояс на сідницях, тулуб вертикально, сідай між п'ятами»</div>
+        </div>
+      </details>
+
+      <!-- A3 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A3 • Верх грудних (30°)</span>
+            <span class="exercise-name">Incline Press 30° (Тренажер Сміта / Машина / Штанга)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Жим у Сміті на лаві 30° (ідеально!) або Жим гантелей/штанги 30°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Кут лави: 30° (2-га або 3-тя поділка).<br>• Spine & Scapula: потилиця, лопатки і сідниці щільно притиснуті до спинки. Лопатки опущені і зведені (без надмірного мосту в попереку).<br>• Grip: хват трохи ширше плечей, лікті під кутом 45–60° до корпусу.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Опускай гриф/рукоятки плавно (3 с) до рівня ключиць / верхньої третини грудей.<br>• Пауза 1 с у нижній точці розтягнення грудних м'язів.<br>• Потужний жим вгору без відриву лопаток від спинки.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке розтягнення і напруга у верхній ключичній порції великого грудного м'яза.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Розведення ліктів під 90° у сторони (травмує передню капсулу плеча) та відриву потилиці або попереку від лави.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Найкращі варіанти для будь-якого залу</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">Варіант №1 (Топ заміна!)</span> <strong>Incline Smith Machine Press (Лава 30° у Сміті):</strong> Є в кожному залі! Млинці навішуєш по 10–20 кг, спина повністю розвантажена спинкою, гачки страхують на будь-якому повторенні.</div>
+              <div class="alt-item"><span class="alt-tag">Варіант №2</span> <strong>Incline Barbell Press (Жим штанги 30°):</strong> Класична похила лава, лікті під 45–60°.</div>
+              <div class="alt-item"><span class="alt-tag">Варіант №3</span> <strong>Incline Cable Press або DB Press (30°):</strong> Жим у кросовері з нижніх блоків або гантелі по 20–25 кг з паузою внизу.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Лава 30°, лопатки втиснуті в спинку, лікті під 45°, пауза 1 с внизу»</div>
+        </div>
+      </details>
+
+      <!-- A4 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A4 • Задня поверхня стегна</span>
+            <span class="exercise-name">Seated Leg Curl (Згинання ніг сидячи)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Згинання ніг лежачи (Lying Leg Curl) або Стоячи по одній нозі</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Вісь обертання: чітко на рівні колінних суглобів.<br>• Валики: нижній валик на ахілловому сухожиллі (над п'ятами), верхній валик щільно затискає стегна зверху.<br>• Таз: втиснутий у кут сидіння, тримайся руками за бічні рукоятки.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Потягни носки на себе (дорсифлексія).<br>• Згинай коліна максимально під себе з паузою 1 с на піку скорочення.<br>• Плавно (3 с) відпускай вгору до повного комфортного розтягнення біцепса стегна.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Інтенсивне скорочення та печіння по всій задній поверхні стегна.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Відриву таза від сидіння або ривків корпусом назад.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо немає тренажера сидячи)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Є всюди)</span> <strong>Lying Leg Curl (Згинання лежачи):</strong> Обов'язково <strong>притисни лобкову кістку і таз до лави (стисни сідниці)</strong>, щоб поперек не вигинався вгору!</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Single-Leg Standing / Kneeling Leg Curl.</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Стегна затиснуті валиком, таз у кут сидіння, п'яти під себе»</div>
+        </div>
+      </details>
+
+      <!-- A5 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A5 • Задня дельта & Манжета</span>
+            <span class="exercise-name">High-Pulley Rope Face Pull + External Rotation</span>
+            <span class="exercise-sub-alt">🔄 Заміна: W-Raise з легкими гантелями на лаві 30° або Face Pull з гумкою</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 12–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">1.5–2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Блок на рівні чола / верхівки голови. Сядь на лаву або стань у стабільну стійку.<br>• Хват нейтральний за канат <strong>великими пальцями до себе (назад)</strong>.<br>• Ребра опущені, маківка витягнута вертикально вгору.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Розводь лікті в сторони під 90° і одночасно розвертай передпліччя вертикально вгору («подвійний біцепс ззаду»).<br>• Великі пальці приходять до скронь/вух, лікті на рівні плечей.<br>• Пауза 2 с на піку скорочення зовнішніх ротаторів.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибока напруга в задніх пучках дельт, підостьовому м'язі та середині спини.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Відхилення тулуба назад за рахунок прогину в попереку та перетворення вправи на звичайну тягу до грудей.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо кросовер зайнятий)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Лава + гантелі)</span> <strong>Incline Prone DB W-Raise (30° лава):</strong> Ляж грудьми на лаву 30°, гантелі по 3–5 кг. Розведи лікті під 90° і розверни передпліччя вгору у літеру «W» (пауза 2 с).</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Resistance Band Face Pull:</strong> Еспандер-петля через стійку на рівні очей.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Великі пальці назад до скронь, маківка вгору, ребра на місці»</div>
+        </div>
+      </details>
+
+      <!-- A6 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A6 • Середня дельта</span>
+            <span class="exercise-name">Single-Arm Cable Lateral Raise</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Махи гантелями з упором грудьми на лаві 70° або Тренажер дельт</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 12–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Ролик кросовера на рівні кисті опущеної руки.<br>• Стань боком до стійки, вільною рукою візьмися за раму і злегка нахилися корпусом убік (10°).<br>• Лопатка опущена, лікоть м'яко зафіксований (10–15° згинання).</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Піднімай руку вбік і на 15–20° вперед (у площині лопатки) до рівня плеча.<br>• Уяви, що тягнешся кистю до далекої стіни.<br>• 3 секунди контрольованого опускання вниз до натягу дельти.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Чисте локальне печіння в бічному пучку дельти без напруги трапеції.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Підйому плеча до вуха та підйому руки вище горизонталі.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Лава + гантелі)</span> <strong>Chest-Supported Incline DB Lateral Raise (Лава 60–70°):</strong> Ляж грудьми на спинку лави і розводь гантелі 6–10 кг у площині лопатки. Виключає читинг і на 100% знімає осьове навантаження.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Lateral Raise Machine (Тренажер махів).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Плече внизу, тягнися кистю в далечінь у площині лопатки»</div>
+        </div>
+      </details>
+
+      <!-- A7 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A7 • Трицепс (довга головка)</span>
+            <span class="exercise-name">Overhead Cable Triceps Extension</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Французький жим EZ-штанги/гантелей лежачи на лаві 30–45°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Блок внизу або на рівні попереку. Стань спиною до кросовера, крок однією ногою вперед для балансу.<br>• Нахил корпусу вперед 15–20°, <strong>напруж прес і опусти ребра</strong>, щоб не прогинатися в спині.<br>• Лікті підняті біля скронь і направлені вперед-вбік під 30°.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Зафіксуй плечову кістку абсолютно нерухомою.<br>• Розгинай тільки лікті вперед-вгору.<br>• 3 секунди повільного опускання за голову до глибокого розтягнення довгої головки трицепса (пауза 1 с).</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке розтягнення та скорочення по задньо-внутрішній поверхні руки.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Розгойдування корпусом, опускання ліктів вниз як у пуловері.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (без блоку)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Ідеально для спини!)</span> <strong>Incline EZ-Bar / DB Skullcrusher (Лава 30–45°):</strong> Ляж спиною на похилу лаву, заведи руки трохи назад за голову і опускай EZ-гриф або гантелі за маківку. Спина на 100% підтримана лавою!</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Single-Arm DB Extension:</strong> Сидячи з опорою спини об вертикальну спинку лави.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Ребра закриті, лікті на місці, розгинай тільки передпліччя»</div>
+        </div>
+      </details>
+
+      <!-- A8 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа A8 • Проти випирання живота</span>
+            <span class="exercise-name">Dead Bug (з повним видихом ребер)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Dead Bug на лаві або Bird Dog з паузою 3 с</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–10 / бік</span>
+              <span class="param-badge rir">Контроль</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Лежачи на спині. <strong>Під потилицю обов'язково складений рушник 2–3 см</strong>, щоб шия була в нейтралі, а підборіддя не закидалося назад.<br>• Підніми ноги в 90/90 і руки вертикально до стелі.<br>• Зроби повний видих ротом, опускаючи нижні ребра і притискаючи поперек до підлоги.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Утримуючи поперек на 100% приклеєним до килимка, повільно (3 с) опускай протилежні руку і ногу.<br>• Опускай тільки до тієї межі, де ребра не задираються вгору.<br>• Пауза 2 с у нижній точці на видиху.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке напруження поперечного м'яза живота («внутрішній анатомічний корсет»).</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Відриву попереку від підлоги, надування живота «будиночком» під час руху.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернатива (якщо немає вільного килимка)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">На будь-якій лаві</span> <strong>Bench Dead Bug / Reverse Pelvic Tilt:</strong> Виконуй лежачи спиною на горизонтальній лаві, тримаючись руками за краї лави біля голови і по черзі опускаючи ноги на повному видиху.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Видихни ребра вниз, поперек приклеєний, живіт плоский»</div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ==========================================
+         DAY B PANEL
+         ========================================== -->
+    <div id="day-b-panel" class="day-content">
+      <div class="card card-green" style="padding:12px 14px;">
+        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня B:</strong> Декомпресія (Lat Pulldown) + Сідниці + Одноручна тяга + Жим плечима 75° + Односторонній жим ногами + Нижня трапеція + Біцепс & Литки.</p>
+      </div>
+
+      <!-- B1 -->
+      <details class="exercise-item" open>
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B1 • Широчайші & Декомпресія</span>
+            <span class="exercise-name">Neutral-Grip Lat Pulldown</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Підтягування у гравітроні (паралельний хват) або Хаммер верхня тяга</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Тракція: 0/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Валик щільно тримає стегна.<br>• Паралельна рукоятка на ширині плечей (долоні одна до одної).<br>• Легкий нахил тулуба назад (10–15°), грудина піднята вгору, поперек нейтральний.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Почни з активного опускання лопаток вниз від вух (депресія).<br>• Веди лікті вперед-вниз до бічних поверхонь ребер/таза.<br>• 3 секунди контрольованого підйому вгору до повного розтягнення і декомпресії хребта.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Розтягнення вгорі та щільне скорочення найширших м'язів під пахвами внизу.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Відхилення корпусу на 45° назад (перетворює на тягу до живота) та закручування плечей вперед у нижній точці.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Neutral-Grip Pull-Ups / Gravitron:</strong> Підтягування паралельним хватом у гравітроні або з власною вагою.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Single-Arm Cable Pulldown:</strong> Тяга верхнього блоку однією рукою з D-рукояткою.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Спочатку плечі вниз від вух, потім лікті в передні кишені»</div>
+        </div>
+      </details>
+
+      <!-- B2 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B2 • Сідниці & Положення таза</span>
+            <span class="exercise-name">Machine Hip Thrust / Glute Drive</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Сідничний міст у тренажері Сміта (Smith Hip Thrust) або Гіперекстензія</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Верх спини на подушці (нижче кутів лопаток). Ремінь по згину кульшових суглобів.<br>• Стопи на платформі так, щоб у верхній точці гомілки стояли строго вертикально (90° у коліні).<br>• Погляд вперед на коліна, підборіддя притиснуте, ребра «зшиті» з тазом.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Натискай п'ятами і розгинай таз до повної горизонталі стегон з тулубом.<br>• Легкий задній нахил таза у верхній точці за рахунок стискання сідниць.<br>• Пауза 2 с угорі, 3 с контрольованого опускання вниз.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Максимальне ізольоване скорочення великих сідничних м'язів без напруги в попереку.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Закидання голови назад, прогину в попереку замість розгинання в кульшових суглобах.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо немає Glute Drive)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Є в кожному залі!)</span> <strong>Smith Machine Hip Thrust (Сідничний міст у Сміті):</strong> Горизонтальна лава поперек Сміта, м'який валик на гриф. Млинці вішаєш по 15–20 кг без перенесення важких штанг через ноги.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Single-Leg Dumbbell Hip Thrust:</strong> На одній нозі з однією гантеллю 15–22 кг на згині стегна.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Погляд вперед, ребра і таз — одне ціле, пауза 2 с вгорі»</div>
+        </div>
+      </details>
+
+      <!-- B3 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B3 • Нижні широчайші & Стабільність</span>
+            <span class="exercise-name">Unilateral Seated Cable Row (однією рукою)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Тяга гантелі однією рукою з опорою на лаву (One-Arm DB Row)</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12 / бік</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 1–2/10</span>
+              <span class="param-badge">2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Сидячи у блоці з D-рукояткою. Сядь високо на сідничних горбах, маківку витягни вертикально вгору.<br>• Корпус зафіксований строго перпендикулярно тросу без скручування.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Веди лікоть ковзним рухом уздовж ребер назад до таза.<br>• Кисть приходить до низу ребер у нейтральному положенні (пауза 1 с).<br>• 3 секунди вперед, лопатка розходиться вперед, але тулуб залишається нерухомим.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Робота нижніх пучків широчайшого м'яза та ізометрична робота м'язів кора проти скручування.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Повороту тулуба слідом за рукою або нахилів спини вперед-назад.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Класика в будь-якому залі)</span> <strong>3-Point Bench-Supported One-Arm DB Row:</strong> Одне коліно і рука на горизонтальній лаві (спина розвантажена на 3 опори!). Тягни гантель 20–25 кг дугою до кульшового суглоба.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Half-Kneeling Single-Arm Cable Row:</strong> На одному коліні в кросовері.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Корпус як статуя, маківка вгору, лікоть ковзає до таза»</div>
+        </div>
+      </details>
+
+      <!-- B4 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B4 • Плечі & Передній зубчастий</span>
+            <span class="exercise-name">High-Incline (75–80°) Shoulder Press</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Жим у Сміті на лаві 75° або Жим гантелей сидячи 75° (нейтральний хват)</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 2/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Спинка під кутом 75–80° (не строго 90°!).<br>• Нейтральний або напівпронований хват (лікті на 30–45° вперед у лопатковій площині).<br>• Спина, потилиця та крижі повністю притиснуті до спинки.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Витискай вгору, дозволяючи лопаткам природно обертатися вгору (висхідна ротація).<br>• Від рівня підборіддя до м'якого випрямлення рук угорі.<br>• 3 секунди контрольованого опускання.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Передній і середній пучки дельт, передній зубчастий м'яз та стабільність лопаток.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Розведення ліктів строго під 90° у сторони та відриву потилиці або попереку від спинки.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Тренажер Сміта)</span> <strong>High-Incline (70–75°) Smith Machine Press:</strong> Лава під 70–75° у Сміт, гриф опускай до верхньої третини грудей. Повна підтримка хребта!</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Neutral-Grip DB Shoulder Press (75°):</strong> Сидячи з гантелями до 20–22 кг паралельним хватом.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Спина і потилиця приклеєні, лікті під 45° вперед»</div>
+        </div>
+      </details>
+
+      <!-- B5 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B5 • Квадрицепс односторонній</span>
+            <span class="exercise-name">Unilateral Leg Press (однією ногою)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Горизонтальний жим ногами (блоковий) або Розгинання ніг сидячи</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–12 / нога</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Робоча стопа посередині платформи на лінії свого кульшового суглоба.<br>• <strong>Неробоча нога стоїть на підлозі перед тренажером</strong> (блокує таз від підкручування!).<br>• Крижі щільно притиснуті до кута сидіння.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Опускай платформу глибоко (3 с), ведучи коліно в бік свого плеча.<br>• Витискай п'ятою і серединою стопи без повного замикання коліна.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибока робота квадрицепса та сідниці без найменшого напруження в спині.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Завалювання коліна всередину (вальгус) та відриву таза від спинки.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Horizontal Seated Leg Press Machine (однією ногою):</strong> Горизонтальний блоковий жим ногами.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Leg Extension (Розгинання ніг сидячи):</strong> З паузою 1 с у верхній точці (100% квадрицепс, 0% навантаження на спину).</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Вільна стопа на підлозі тримає таз, коліно йде до свого плеча»</div>
+        </div>
+      </details>
+
+      <!-- B6 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B6 • Нижня трапеція</span>
+            <span class="exercise-name">Chest-Supported Incline Y-Raise (Кабель або Гантелі)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Y-Raise з легкими гантелями 2–5 кг лежачи грудьми на лаві 30–45°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 12–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Лава під 30–45° у кросовері (або з легкими гантелями 2–4 кг).<br>• Ляж грудьми на спинку, підборіддя виступає за край.<br>• Опусти лопатки вниз до таза, великі пальці направлені вгору.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Ініціюй рух опусканням лопаток, піднімаючи руки під кутом 120–135° у форму літери «Y».<br>• Піднімай до лінії тулуба, пауза 1–2 с на піку.<br>• 3 секунди контрольованого опускання.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Точкове скорочення та печіння під лопатками в зоні **нижньої трапеції**.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Знизування плечима до вух (перевантажує верхню трапецію) та відриву грудей від лави.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернатива (без кросовера)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Працює всюди!)</span> <strong>Incline Prone Dumbbell Y-Raise:</strong> Ляж грудьми на будь-яку похилу лаву 30–45° з гантелями по 2–5 кг (або млинцями 2.5 кг) і піднімай руки у літеру «Y» з паузою 2 с угорі.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Лопатки в задні кишені, великі пальці в стелю, форма Y»</div>
+        </div>
+      </details>
+
+      <!-- B7 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B7 • Біцепс (розтягнута позиція)</span>
+            <span class="exercise-name">Bayesian Cable Curl / Incline DB Curl</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Згинання рук з гантелями сидячи на похилій лаві 45–60°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Стоячи спиною до нижнього блоку кросовера (або сидячи на лаві 45–60°).<br>• Рука відведена на 20–30° за корпус, лопатка опущена і стабільна.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Утримуй лікоть за спиною, згинай руку з супінацією кисті.<br>• 3 секунди повільного опускання до повного розтягнення біцепса позаду корпусу.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке розтягнення біцепса внизу і приємне розкриття передньої поверхні плеча.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Виштовхування ліктя вперед за рахунок передньої дельти та сутулення плеча вперед.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (100% аналог!)</span> <strong>Incline Dumbbell Curl (Лава 45–60°):</strong> Сидячи на лаві, руки з гантелями 8–14 кг вільно звисають за спиною.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Preacher Curl Machine (Лава Скотта).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Лікоть залишається позаду корпуса, розкрий плече»</div>
+        </div>
+      </details>
+
+      <!-- B8 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа B8 • Литки (без осьового тиску)</span>
+            <span class="exercise-name">Leg Press Calf Raise</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Підйом на носок на одній нозі на сходинці з гантеллю або Сидячи</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup & Safety</strong>
+                  <p>• Подушечки під пальцями на нижньому краї платформи жиму ногами.<br>• Коліна майже прямі (175°). <strong>Страхувальні важелі тренажера тримай закритими або під руками!</strong></p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Плавно опускай п'яти вперед (дорсифлексія) і <strong>затримайся на 2 повні секунди на піку розтягнення</strong> (гасить пружність сухожилля).<br>• Потужний підйом на носки з паузою 1 с угорі.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Глибоке печіння вздовж литкового та камбалоподібного м'язів.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Пружних швидких підстрибувань без паузи внизу.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Horizontal Leg Press Calf Raise:</strong> У блоковому жимі ногами.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Single-Leg Step Calf Raise:</strong> На сходинці або диску з однією гантеллю 12–20 кг у руці (пауза 2 с внизу).</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Коліна прямі, 2 секунди пауза в повному розтягненні внизу»</div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ==========================================
+         DAY C PANEL
+         ========================================== -->
+    <div id="day-c-panel" class="day-content">
+      <div class="card card-green" style="padding:12px 14px;">
+        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня C:</strong> Вузька тяга з упором + Тазовий шарнір (45° Back Extension) + Широка вертикальна тяга + Горизонтальний жим + Спліт-присідання + Задня дельта + Pallof Press.</p>
+      </div>
+
+      <!-- C1 -->
+      <details class="exercise-item" open>
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C1 • Товщина спини</span>
+            <span class="exercise-name">Chest-Supported Iso-Lateral Row (Hammer)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Тяга 2 гантелей нейтральним хватом на лаві 30° або Блок V-ручка</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Подушка під серединою грудей, нейтральні рукоятки на рівні сонячного сплетіння.<br>• Сміливо став важкі робочі ваги на штики (навішуй диски по 20–25 кг). Реакція опори повністю гаситься рамою тренажера!</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Тягни лікті вздовж тулуба назад (кути ліктів 20–30° до ребер).<br>• Повне зведення лопаток у кінці руху з паузою 1 с.<br>• 3 секунди контрольованого повернення вперед.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Щільне завантаження всієї товщини спини (широчайші, ромбоподібні, середня/нижня трапеція).</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Відриву грудей від подушки на зусиллі.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (якщо немає Hammer Row)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Лава + гантелі)</span> <strong>Chest-Supported Incline Neutral DB Row (30° лава):</strong> Ляж грудьми на лаву 30°, гантелі по 20–25 кг паралельним хватом. Тягни лікті вздовж ребер назад з паузою 1 с.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Close-Grip Cable Row (V-ручка):</strong> Сидячи з ідеально прямим вертикальним хребтом без розгойдування.</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Груди в подушку, лікті вздовж ребер за спину, пауза 1 с»</div>
+        </div>
+      </details>
+
+      <!-- C2 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C2 • Сідниці, Біцепс стегна & Розгиначі</span>
+            <span class="exercise-name">45° Back Extension (Hip Hinge з прямим хребтом)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: B-Stance RDL на одній нозі з 1 гантеллю 20–24 кг або Лава 90°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–15</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Критичне налаштування!)</strong>
+                  <p>• Подушка обов'язково <strong>нижче гребенів тазових кісток (на верхній третині стегон)</strong>, щоб таз вільно обертався, а спина НЕ згиналася.<br>• Хребет від куприка до потилиці — пряма лінія. Руки на грудях або легкий диск 5–10 кг.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Відводь таз назад, опускаючи прямий тулуб до розтягнення біцепса стегна.<br>• Піднімайся потужним стисканням сідниць до прямої лінії з ногами (пауза 1 с).<br>• <strong>Не перерозгинайся вище прямої лінії!</strong></p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Сідниці, задня поверхня стегна та рівномірна ізометрична витривалість розгиначів спини.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Згинання та розгинання хребта (маятникові рухи спиною) та закидання голови.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Розумний хак ваги!)</span> <strong>B-Stance (Kickstand) RDL з 1 гантеллю 20–24 кг:</strong> Оскільки 85% навантаження припадає на одну ногу, лише одна гантель 20–24 кг (в межах ліміту носіння!) дає стимул як 50–60 кг на двох ногах при мінімальному навантаженні на хребет!</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Horizontal Roman Chair (Гіперекстензія 90°) або Cable Pull-Through.</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Подушка нижче таза, хребет як сталева палиця, піднімайся сідницями»</div>
+        </div>
+      </details>
+
+      <!-- C3 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C3 • Ширина верху спини</span>
+            <span class="exercise-name">Medium-Wide Pronated Lat Pulldown</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Верхня тяга у Хаммері (Iso-Lateral Pulldown) або Гравітрон</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Тракція: 0/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Хват зверху (пронований) на 1.3–1.5 ширини плечей.<br>• Легкий нахил назад (10–15°), шия на осі хребта (підборіддя не висувати вперед!).</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Тягни гриф до ключиць, ведучи лікті вниз і трохи вперед у площині лопатки.<br>• 3 секунди повернення вгору до повного комфортного розтягнення найширших.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Верхній зовнішній контур широчайших м'язів та великий круглий м'яз.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Тяги за голову (травмує плече і виштовхує шию вперед) та ривків спиною.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Iso-Lateral High Row / Pulldown (Hammer Strength):</strong> Важільна верхня тяга.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Assisted Pull-Ups (Гравітрон середнім хватом).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Лікті вниз у бік ребер, ключиці тягнуться до грифа»</div>
+        </div>
+      </details>
+
+      <!-- C4 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C4 • Середина грудних</span>
+            <span class="exercise-name">Flat / Slight-Decline Machine Chest Press</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Жим у Сміті на горизонтальній лаві, Жим штанги або Кросовер сидячи</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">2.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Рукоятки на рівні середини грудей.<br>• Лопатки опущені і втиснуті в спинку, лікті під 45–60° до корпусу.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• 3 секунди вниз до глибокого розтягнення грудних (пауза 0.5–1 с).<br>• Плавний потужний жим без відриву лопаток від спинки.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Щільне скорочення середини та низу грудних м'язів.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Виштовхування плечей вперед у фінальній точці жиму.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи (для будь-якого залу)</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Тренажер Сміта / Штанга)</span> <strong>Flat Smith Machine Press або Barbell Bench Press:</strong> Горизонтальна лава, диски по 10–20 кг, стопи на підлозі.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Seated Cable Chest Press:</strong> Лава зі спинкою 75–80° у кросовері на рівні грудей (нуль навантаження на спину!).</div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Плечі притиснуті до спинки, витискай грудьми»</div>
+        </div>
+      </details>
+
+      <!-- C5 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C5 • Односторонні ноги & Розтяг таза</span>
+            <span class="exercise-name">Bulgarian Split Squat (з опорою рукою)</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Спліт-присідання у Сміті або Випади назад з нижнього блоку кросовера</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 8–12 / нога</span>
+              <span class="param-badge rir">RIR 1–2</span>
+              <span class="param-badge axial">Осьове: 2/10</span>
+              <span class="param-badge">2 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Задня стопа на підставці/валику (30–40 см).<br>• В одній руці гантель 10–18 кг, **друга рука легко тримається за стійку рами** (прибирає дефіцит балансу на 100%).</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Опускайся вертикально вниз з легким нахилом прямого корпусу вперед (15°).<br>• 3 секунди опускання, розтягуючи згиначі стегна задньої ноги.<br>• Витискай себе передньою ногою.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Квадрицепс і сідниця передньої ноги + приємний розтяг передньої поверхні заднього стегна.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Завалювання коліна передньої ноги всередину.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Cable Split Squat:</strong> Рукоятка нижнього блоку в одній руці, друга рука тримається за стійку.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>High Step-Up (Зашагування на платформу з гантеллю 10–15 кг і опорою рукою).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Рука на опорі, спина рівна, опускай заднє коліно вниз»</div>
+        </div>
+      </details>
+
+      <!-- C6 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C6 • Задня дельта (ізоляція)</span>
+            <span class="exercise-name">Reverse Pec Deck</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Перехресне розведення тросів у кросовері або Махи лежачи на лаві 30°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 12–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 0/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Setup (Налаштування)</strong>
+                  <p>• Грудина притиснута до подушки, рукоятки на рівні плечей.<br>• Руки майже прямі (легке згинання в ліктях 10°).</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Execution (Виконання)</strong>
+                  <p>• Не зводь лопатки на старті — веди прямі руки назад широкою дугою в сторони.<br>• Зупинися на лінії корпусу (пауза 1 с).<br>• 3 секунди повільного повернення вперед.</p>
+                </div>
+                <div class="tech-item feel">
+                  <strong>Feel</strong>
+                  <p>Ізольоване печіння в задньому пучку дельтоподібного м'яза.</p>
+                </div>
+                <div class="tech-item avoid">
+                  <strong>Avoid</strong>
+                  <p>Підйому плечей до вух та переведення руху в силове зведення лопаток трапецією.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б (Кросовер — топ профіль!)</span> <strong>Cross-Body Cable Rear Delt Fly:</strong> Блоки на рівні плечей, перехрести троси і розводь прямі руки назад-в сторони.</div>
+              <div class="alt-item"><span class="alt-tag">План В</span> <strong>Chest-Supported Incline DB Rear Delt Fly (30° лава + гантелі 5–8 кг).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Широка дуга ліктями в сторони, плечі опущені»</div>
+        </div>
+      </details>
+
+      <!-- C7 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C7 • Середня дельта</span>
+            <span class="exercise-name">Single-Arm Cable Lateral Raise</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Махи гантелями сидячи/лежачи грудьми на лаві 70°</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 12–15</span>
+              <span class="param-badge rir">RIR 0–1</span>
+              <span class="param-badge axial">Осьове: 1/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Execution & Cue</strong>
+                  <p>Ролик на рівні кисті. Піднімай руку на 15–20° у площині лопатки до паралелі з підлогою. 3 с негатив.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернатива</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Chest-Supported Incline DB Lateral Raise (Лава 70°) або Тренажер махів у сторони.</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Тягнися рукою в далечінь у площині лопатки»</div>
+        </div>
+      </details>
+
+      <!-- C8 -->
+      <details class="exercise-item">
+        <summary class="exercise-header">
+          <div class="exercise-title-group">
+            <span class="exercise-number">Вправа C8 • Антиротація кора & Литки</span>
+            <span class="exercise-name">Standing Cable Pallof Press + Calf Raise</span>
+            <span class="exercise-sub-alt">🔄 Заміна: Pallof Press з гумкою або Бічна планка (Side Plank)</span>
+            <div class="exercise-params">
+              <span class="param-badge sets">2 × 10–12/бік + 2×12–15</span>
+              <span class="param-badge rir">RIR 1 / 0–1</span>
+              <span class="param-badge axial">Осьове: 0–1/10</span>
+              <span class="param-badge">1.5 хв</span>
+            </div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </summary>
+        <div class="exercise-body">
+          
+          <details class="sub-detail" open>
+            <summary class="sub-header tech-color">
+              <span>📖 Детальна техніка та біомеханіка</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="tech-grid">
+                <div class="tech-item">
+                  <strong>Pallof Press (Антиротація)</strong>
+                  <p>• Стоячи боком до блоку на рівні сонячного сплетіння. Стопи на ширині плечей, коліна м'які, ребра опущені.<br>• Виведи рукоятку двома руками прямо перед собою на прямі руки.<br>• Зафіксуй на 2–3 секунди на видиху, чинячи опір обертанню тулуба. Поверни до грудей.</p>
+                </div>
+                <div class="tech-item">
+                  <strong>Leg Press Calf Raise</strong>
+                  <p>Одразу після пресу кора — 2 підходи литок у тренажері жиму ногами з 2-секундною паузою внизу.</p>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="sub-detail">
+            <summary class="sub-header alt-color">
+              <span>🔄 Альтернативи</span>
+              <svg class="sub-icon" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="sub-body">
+              <div class="alt-item"><span class="alt-tag">План Б</span> <strong>Resistance Band Pallof Press (з гумовою петлею)</strong> або <strong>Side Plank (Бічна планка 2 × 35–45 с).</strong></div>
+            </div>
+          </details>
+
+          <div class="cue-box">💡 Cue: «Таз, ребра і ніс на одній лінії, зафіксуй руки»</div>
+        </div>
+      </details>
+    </div>
+
+  </section>
+
+  <!-- ==========================================
+       TAB 2: CNS & WARM-UP STRATEGY
+       ========================================== -->
+  <section id="tab-strategy" class="section-tab">
+    <div class="card card-purple">
+      <h2>🧠 Чому ми прибрали довгу розминку з залу</h2>
+      <p><strong>Центральна нервова система (ЦНС) має лімітований запас високочастотної імпульсації.</strong> Якщо перед тренуванням 15–20 хвилин робити дрібні вправи на поставу, ЦНС втомлюється ще до першого підходу, і ти втрачаєш 15–20% силового потенціалу.</p>
+    </div>
+
+    <div class="card card-highlight">
+      <h2>⏱️ 4-Хвилинний Warm-Up у залі (0% втоми ЦНС)</h2>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Розігрів плечей та видих ребер (1.5 хв)</h4>
+          <p>10 плавних кіл плечима назад + 5 глибоких видихів з опусканням нижніх ребер.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Розкриття таза в напіввипаді (1.5 хв)</h4>
+          <p>По 35 с на кожну ногу: стань на одне коліно, стисни сідницю задньої ноги, щоб зняти спазм зі згиначів стегна після сидіння за ПК.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>2 підвідні сети у першій вправі</h4>
+          <p>50% ваги × 6 повт. → 75% ваги × 3 повт. → Робочі підходи на 100% свіжу ЦНС!</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🏠 Мікро-протокол постави вдома (2× на день по 2 хв)</h2>
+      <p>Виконуй між робочими задачами біля стіни (не в день/час залу):</p>
+      <ul>
+        <li><strong>Chin Tuck (Глибокі згиначі шиї):</strong> 8 кивків підборіддям по 5 с утримання.</li>
+        <li><strong>Wall Slide з відривом рук:</strong> 8 повільних ковзань руками вгору у форму «Y» біля стіни.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ==========================================
+       TAB 3: BELLY FIX & RECOMPOSITION
+       ========================================== -->
+  <section id="tab-recomp" class="section-tab">
+    <div class="card card-green">
+      <h2>🎯 Як прибрати «пузо» без схуднення</h2>
+      <p>Коли загальна вага нормальна, але живіт випирає вперед, причина криється у 3 факторах:</p>
+      <ul>
+        <li><strong>1. Передній нахил таза (Anterior Pelvic Tilt):</strong> Від сидіння згиначі стегна вкорочуються і нахиляють таз вперед, виштовхуючи живіт назовні.</li>
+        <li><strong>2. Вимкнений поперечний м'яз живота (Transversus Abdominis):</strong> М'яз-корсет не тримає внутрішньочеревний тиск.</li>
+        <li><strong>3. Локальний вісцеральний/підшкірний шар:</strong> Який переробляється у м'язову тканину через рекомпозицію.</li>
+      </ul>
+    </div>
+
+    <div class="card card-highlight">
+      <h2>⚡ План рекомпозиції (Вага стабільна, живіт іде, м'язи ростуть)</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Елемент</th>
+              <th>Норма</th>
+              <th>Ефект</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Калорії</strong></td>
+              <td>Рівень підтримки (Maintenance)</td>
+              <td>Організм бере відсутню енергію для росту м'язів із жирових депо на животі, зберігаючи вагу тіла.</td>
+            </tr>
+            <tr>
+              <td><strong>Білок</strong></td>
+              <td>1.8–2.0 г / кг ваги</td>
+              <td>Максимальний синтез м'язового білка після 3 тренувань Full Body.</td>
+            </tr>
+            <tr>
+              <td><strong>Корсет живота</strong></td>
+              <td>Dead Bug (День A) + Pallof Press (День C)</td>
+              <td>Підтягує черевну стінку всередину на 3–5 см у спокої вже за перші 4–6 тижнів.</td>
+            </tr>
+            <tr>
+              <td><strong>Сідниці & Таз</strong></td>
+              <td>Glute Drive / Сміт + Leg Press + Split Squat</td>
+              <td>Вирівнюють таз, прибираючи прогин попереку та випирання живота.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==========================================
+       TAB 4: PROGRESSION & WEIGHTS
+       ========================================== -->
+  <section id="tab-progression" class="section-tab">
+    <div class="card card-highlight">
+      <h2>📈 Схема подвійної прогресії</h2>
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Закрий верхню межу у 2 підходах</h4>
+          <p>Працюй з однією вагою, поки не зробиш <strong>12 + 12</strong> (у базі) або <strong>15 + 15</strong> (в ізоляції) із запасом 1 RIR.</p>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Додай вагу на наступному тренуванні</h4>
+          <p>• Belt Squat / Сміт / Leg Press: <strong>+5 кг</strong><br>
+             • Тяги / Блоки / Жими у Сміті: <strong>+2.5 кг</strong><br>
+             • Махи на дельти / Y-Raise / Руки: <strong>+0.5–1.25 кг</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card card-amber">
+      <h2>🛡️ Секрет універсальної заміни: Тренажер Сміта + Лава 30°</h2>
+      <p>У будь-якому залі, де немає спеціалізованих важелів Hammer Strength, твоєю головною зброєю стають:</p>
+      <ul>
+        <li><strong>Тренажер Сміта + Похила лава (30° або 75°):</strong> На 100% замінює будь-які жимові машини та Glute Drive. Ти навішуєш млинці по 10–20 кг без перевантаження спини, спинка лави тримає хребет, а гачки страхують на будь-якій висоті.</li>
+        <li><strong>Похила лава 30° + Гантелі до 22–25 кг:</strong> Коли ти лягаєш грудьми на лаву 30°, вона перетворюється на ідеальний <em>Chest-Supported Row</em> з нульовим навантаженням на хребет.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<!-- PURE CSS BOTTOM NAVIGATION LABELS -->
+<nav class="nav-bar">
+  <label for="nav-workout" class="nav-btn">
+    <svg viewBox="0 0 24 24"><path d="M6 4v16M18 4v16M2 8h4M18 8h4M2 16h4M18 16h4M6 12h12"/></svg>
+    Програма
+  </label>
+  <label for="nav-strategy" class="nav-btn">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    ЦНС & Розминка
+  </label>
+  <label for="nav-recomp" class="nav-btn">
+    <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    Живіт & М'язи
+  </label>
+  <label for="nav-progression" class="nav-btn">
+    <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+    Прогресія
+  </label>
+</nav>
+
+</body>
+</html>
