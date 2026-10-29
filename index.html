@@ -5,547 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Full Body 3x — Pro Technique & Universal Gym (iOS Ready)</title>
-<style>
-  :root {
-    --bg-main: #0a0d14;
-    --bg-header: #111622;
-    --bg-card: #151c28;
-    --bg-subcard: #0d121c;
-    --accent: #3b82f6;
-    --accent-soft: rgba(59, 130, 246, 0.16);
-    --accent-green: #10b981;
-    --accent-amber: #f59e0b;
-    --accent-purple: #8b5cf6;
-    --accent-cyan: #06b6d4;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --border: #222d3d;
-    --border-light: #2d3b4f;
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-
-  * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  html, body {
-    background-color: var(--bg-main);
-    color: var(--text-primary);
-    font-family: var(--font);
-    line-height: 1.5;
-    -webkit-text-size-adjust: 100%;
-    overscroll-behavior-y: none;
-  }
-
-  body {
-    padding-bottom: calc(85px + env(safe-area-inset-bottom, 16px));
-  }
-
-  /* Pure CSS State Management (Zero-JS Engine) */
-  input.state-radio {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-    width: 0;
-    height: 0;
-  }
-
-  label {
-    cursor: pointer;
-    touch-action: manipulation;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-
-  summary {
-    cursor: pointer;
-    touch-action: pan-y;
-    user-select: text;
-    -webkit-user-select: text;
-  }
-
-  /* Header */
-  header {
-    background-color: var(--bg-header);
-    border-bottom: 1px solid var(--border);
-    padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px;
-    position: sticky;
-    top: 0;
-    z-index: 40;
-  }
-
-  .header-container {
-    max-width: 880px;
-    margin: 0 auto;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .logo-block h1 {
-    font-size: 1.15rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    color: #60a5fa;
-  }
-
-  .logo-block p {
-    font-size: 0.73rem;
-    color: var(--text-secondary);
-  }
-
-  .badge-recomp {
-    background: rgba(16, 185, 129, 0.14);
-    color: var(--accent-green);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    padding: 4px 9px;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  /* Main Container */
-  main {
-    max-width: 880px;
-    margin: 0 auto;
-    padding: 14px;
-  }
-
-  /* Tabs Switching Logic */
-  .section-tab {
-    display: none;
-  }
-
-  #nav-workout:checked ~ main #tab-workout,
-  #nav-strategy:checked ~ main #tab-strategy,
-  #nav-recomp:checked ~ main #tab-recomp,
-  #nav-progression:checked ~ main #tab-progression {
-    display: block;
-  }
-
-  /* Bottom Navigation Bar */
-  .nav-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background-color: var(--bg-header);
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-around;
-    padding: 6px 8px calc(10px + env(safe-area-inset-bottom, 8px));
-    z-index: 100;
-  }
-
-  .nav-btn {
-    flex: 1;
-    max-width: 180px;
-    color: var(--text-muted);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.68rem;
-    font-weight: 600;
-    padding: 6px 4px;
-    border-radius: var(--radius-sm);
-    text-align: center;
-  }
-
-  .nav-btn svg {
-    width: 21px;
-    height: 21px;
-    margin-bottom: 3px;
-    stroke: currentColor;
-    stroke-width: 2;
-    fill: none;
-  }
-
-  #nav-workout:checked ~ .nav-bar label[for="nav-workout"],
-  #nav-strategy:checked ~ .nav-bar label[for="nav-strategy"],
-  #nav-recomp:checked ~ .nav-bar label[for="nav-recomp"],
-  #nav-progression:checked ~ .nav-bar label[for="nav-progression"] {
-    color: #60a5fa;
-    background-color: var(--accent-soft);
-  }
-
-  /* Day Selector Pill Group */
-  .pill-group {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 16px;
-    background-color: #10141d;
-    padding: 4px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-  }
-
-  .pill-btn {
-    flex: 1;
-    text-align: center;
-    padding: 10px 6px;
-    color: var(--text-muted);
-    font-weight: 700;
-    font-size: 0.85rem;
-    border-radius: var(--radius-sm);
-  }
-
-  .day-content {
-    display: none;
-  }
-
-  #day-a-radio:checked ~ .pill-group label[for="day-a-radio"],
-  #day-b-radio:checked ~ .pill-group label[for="day-b-radio"],
-  #day-c-radio:checked ~ .pill-group label[for="day-c-radio"] {
-    background-color: var(--accent);
-    color: #ffffff;
-  }
-
-  #day-a-radio:checked ~ #day-a-panel,
-  #day-b-radio:checked ~ #day-b-panel,
-  #day-c-radio:checked ~ #day-c-panel {
-    display: block;
-  }
-
-  /* Cards */
-  .card {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 16px;
-    margin-bottom: 14px;
-  }
-
-  .card-highlight { border-left: 4px solid var(--accent); }
-  .card-green { border-left: 4px solid var(--accent-green); }
-  .card-amber { border-left: 4px solid var(--accent-amber); }
-  .card-purple { border-left: 4px solid var(--accent-purple); }
-
-  h2 {
-    font-size: 1.08rem;
-    font-weight: 700;
-    margin-bottom: 10px;
-    color: #ffffff;
-  }
-
-  h3 {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #93c5fd;
-    margin: 12px 0 6px;
-  }
-
-  p {
-    font-size: 0.88rem;
-    color: var(--text-secondary);
-    margin-bottom: 10px;
-  }
-
-  ul, ol {
-    margin-left: 18px;
-    margin-bottom: 10px;
-    color: var(--text-secondary);
-    font-size: 0.86rem;
-  }
-
-  li { margin-bottom: 6px; }
-  strong { color: #ffffff; }
-
-  /* Native Exercise Accordions */
-  details.exercise-item {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    margin-bottom: 12px;
-    overflow: hidden;
-  }
-
-  summary.exercise-header {
-    padding: 14px 15px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    list-style: none;
-  }
-
-  summary.exercise-header::-webkit-details-marker {
-    display: none;
-  }
-
-  .exercise-title-group {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding-right: 8px;
-  }
-
-  .exercise-number {
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: #60a5fa;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .exercise-name {
-    font-size: 0.98rem;
-    font-weight: 700;
-    color: #ffffff;
-  }
-
-  .exercise-sub-alt {
-    font-size: 0.76rem;
-    color: #fbbf24;
-    font-weight: 500;
-  }
-
-  .exercise-params {
-    display: flex;
-    gap: 6px;
-    margin-top: 5px;
-    flex-wrap: wrap;
-  }
-
-  .param-badge {
-    background-color: #1c2433;
-    border: 1px solid #2d384d;
-    padding: 2px 7px;
-    border-radius: 5px;
-    font-size: 0.72rem;
-    color: #cbd5e1;
-    font-weight: 600;
-  }
-
-  .param-badge.sets { color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); }
-  .param-badge.rir { color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
-  .param-badge.axial { color: #c084fc; border-color: rgba(192, 132, 252, 0.35); }
-
-  .chevron {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    stroke: var(--text-muted);
-    stroke-width: 2.5;
-    fill: none;
-    transition: transform 0.15s ease;
-  }
-
-  details[open] > summary .chevron {
-    transform: rotate(180deg);
-    stroke: #60a5fa;
-  }
-
-  .exercise-body {
-    padding: 0 15px 15px;
-    border-top: 1px solid var(--border);
-    background-color: var(--bg-subcard);
-  }
-
-  /* Nested Expandable Sub-Blocks */
-  details.sub-detail {
-    background-color: var(--bg-card);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm);
-    margin-top: 10px;
-    overflow: hidden;
-  }
-
-  summary.sub-header {
-    padding: 10px 12px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    list-style: none;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #93c5fd;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background-color: rgba(255, 255, 255, 0.02);
-  }
-
-  summary.sub-header::-webkit-details-marker {
-    display: none;
-  }
-
-  summary.sub-header.alt-color {
-    color: #fbbf24;
-  }
-
-  summary.sub-header.tech-color {
-    color: #67e8f9;
-  }
-
-  .sub-icon {
-    width: 16px;
-    height: 16px;
-    stroke: var(--text-muted);
-    stroke-width: 2.5;
-    fill: none;
-    transition: transform 0.15s ease;
-  }
-
-  details.sub-detail[open] > summary .sub-icon {
-    transform: rotate(180deg);
-    stroke: currentColor;
-  }
-
-  .sub-body {
-    padding: 12px;
-    border-top: 1px solid var(--border);
-    font-size: 0.83rem;
-  }
-
-  /* Setup & Execution Grid Inside Tech Block */
-  .tech-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .tech-item {
-    background-color: rgba(0, 0, 0, 0.2);
-    padding: 8px 10px;
-    border-radius: 6px;
-    border-left: 2px solid var(--accent);
-  }
-
-  .tech-item strong {
-    color: #93c5fd;
-    display: block;
-    font-size: 0.74rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin-bottom: 2px;
-  }
-
-  .tech-item p {
-    margin-bottom: 0;
-    color: #e2e8f0;
-    font-size: 0.81rem;
-  }
-
-  .tech-item.feel { border-left-color: var(--accent-green); }
-  .tech-item.feel strong { color: #86efac; }
-
-  .tech-item.avoid { border-left-color: #ef4444; }
-  .tech-item.avoid strong { color: #fca5a5; }
-
-  .tech-item.mistake { border-left-color: var(--accent-amber); }
-  .tech-item.mistake strong { color: #fde68a; }
-
-  /* Alternative Block Inside Sub-Detail */
-  .alt-item {
-    margin-bottom: 8px;
-    color: #f1f5f9;
-    font-size: 0.82rem;
-  }
-
-  .alt-item:last-child {
-    margin-bottom: 0;
-  }
-
-  .alt-tag {
-    display: inline-block;
-    background-color: rgba(245, 158, 11, 0.2);
-    color: #fde68a;
-    font-weight: 700;
-    font-size: 0.69rem;
-    padding: 1px 6px;
-    border-radius: 4px;
-    margin-right: 4px;
-  }
-
-  .cue-box {
-    background-color: rgba(16, 185, 129, 0.12);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    color: #a7f3d0;
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
-    margin-top: 10px;
-    font-weight: 600;
-    font-size: 0.83rem;
-  }
-
-  /* Table styling */
-  .table-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    margin: 10px 0;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-    text-align: left;
-  }
-
-  th {
-    background-color: #1a2232;
-    color: #93c5fd;
-    padding: 9px 11px;
-    font-weight: 700;
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-  }
-
-  td {
-    padding: 9px 11px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-secondary);
-  }
-
-  tr:last-child td { border-bottom: none; }
-
-  /* Steps */
-  .step-card {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 10px;
-    background-color: #111621;
-    padding: 12px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-  }
-
-  .step-num {
-    background-color: var(--accent);
-    color: #fff;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 0.8rem;
-    flex-shrink: 0;
-  }
-
-  .step-content h4 {
-    font-size: 0.9rem;
-    color: #fff;
-    margin-bottom: 3px;
-  }
-
-  .step-content p {
-    font-size: 0.82rem;
-    margin-bottom: 0;
-  }
-</style>
+<meta name="theme-color" content="#111622">
+<meta name="description" content="Мобільний журнал програми Full Body 3× з історією робочої ваги та повторень.">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<title>Full Body 3× — журнал тренувань</title>
+<link rel="stylesheet" href="./assets/styles.css">
+<script type="module" src="./js/app.js" defer></script>
 </head>
 <body>
 
@@ -554,6 +21,7 @@
 <input type="radio" name="main-nav" id="nav-strategy" class="state-radio">
 <input type="radio" name="main-nav" id="nav-recomp" class="state-radio">
 <input type="radio" name="main-nav" id="nav-progression" class="state-radio">
+<input type="radio" name="main-nav" id="nav-history" class="state-radio">
 
 <header>
   <div class="header-container">
@@ -561,7 +29,10 @@
       <h1>FULL BODY 3X // PRO</h1>
       <p>Повна біомеханічна техніка • Заміни для залу • iOS Ready</p>
     </div>
-    <div class="badge-recomp">Zero-JS 120fps</div>
+    <div class="header-actions">
+      <button id="apply-update" class="update-btn" type="button" hidden>Доступне оновлення</button>
+      <div class="badge-recomp" id="app-connection-status">Локальний журнал</div>
+    </div>
   </div>
 </header>
 
@@ -576,22 +47,40 @@
     <input type="radio" name="day-nav" id="day-b-radio" class="state-radio">
     <input type="radio" name="day-nav" id="day-c-radio" class="state-radio">
 
-    <div class="pill-group">
-      <label for="day-a-radio" class="pill-btn">ДЕНЬ A</label>
-      <label for="day-b-radio" class="pill-btn">ДЕНЬ B</label>
-      <label for="day-c-radio" class="pill-btn">ДЕНЬ C</label>
+    <div class="pill-group" role="tablist" aria-label="День тренування">
+      <label for="day-a-radio" class="pill-btn" role="tab" tabindex="0" aria-selected="true" aria-controls="day-a-panel">ДЕНЬ A</label>
+      <label for="day-b-radio" class="pill-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="day-b-panel">ДЕНЬ B</label>
+      <label for="day-c-radio" class="pill-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="day-c-panel">ДЕНЬ C</label>
     </div>
+
+    <section class="workout-session card card-highlight" aria-labelledby="workout-session-title">
+      <div class="session-heading">
+        <div>
+          <h2 id="workout-session-title">Поточне тренування</h2>
+          <p id="active-session-summary">Вибери день і почни тренування.</p>
+        </div>
+        <output id="save-status" class="save-status" aria-live="polite">Готово</output>
+      </div>
+      <div class="session-controls">
+        <label class="field-label" for="workout-date">Дата
+          <input id="workout-date" name="workout-date" type="date">
+        </label>
+        <button id="start-workout" class="action-btn action-primary" type="button">Почати тренування</button>
+        <button id="finish-workout" class="action-btn action-success" type="button" disabled>Завершити</button>
+      </div>
+      <p class="session-hint">Результати зберігаються на цьому пристрої після кожної зміни.</p>
+    </section>
 
     <!-- ==========================================
          DAY A PANEL
          ========================================== -->
     <div id="day-a-panel" class="day-content">
-      <div class="card card-green" style="padding:12px 14px;">
-        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня A:</strong> Верх спини (трапеції/задня дельта) + Квадрицепс + Верх грудних (30°) + Задня поверхня стегна + Трицепс + Плоский живіт (Dead Bug).</p>
+      <div class="card card-green focus-card">
+        <p><strong>Фокус Дня A:</strong> Верх спини (трапеції/задня дельта) + Квадрицепс + Верх грудних (30°) + Задня поверхня стегна + Трицепс + Плоский живіт (Dead Bug).</p>
       </div>
 
       <!-- A1 -->
-      <details class="exercise-item" open>
+      <details class="exercise-item" data-slot-id="a1" open>
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A1 • Верхня спина</span>
@@ -657,7 +146,7 @@
       </details>
 
       <!-- A2 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a2">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A2 • Квадрицепс & Сідниці</span>
@@ -717,7 +206,7 @@
       </details>
 
       <!-- A3 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a3">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A3 • Верх грудних (30°)</span>
@@ -778,7 +267,7 @@
       </details>
 
       <!-- A4 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a4">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A4 • Задня поверхня стегна</span>
@@ -838,7 +327,7 @@
       </details>
 
       <!-- A5 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a5">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A5 • Задня дельта & Манжета</span>
@@ -898,7 +387,7 @@
       </details>
 
       <!-- A6 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a6">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A6 • Середня дельта</span>
@@ -958,7 +447,7 @@
       </details>
 
       <!-- A7 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a7">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A7 • Трицепс (довга головка)</span>
@@ -1018,7 +507,7 @@
       </details>
 
       <!-- A8 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="a8">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа A8 • Проти випирання живота</span>
@@ -1081,12 +570,12 @@
          DAY B PANEL
          ========================================== -->
     <div id="day-b-panel" class="day-content">
-      <div class="card card-green" style="padding:12px 14px;">
-        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня B:</strong> Декомпресія (Lat Pulldown) + Сідниці + Одноручна тяга + Жим плечима 75° + Односторонній жим ногами + Нижня трапеція + Біцепс & Литки.</p>
+      <div class="card card-green focus-card">
+        <p><strong>Фокус Дня B:</strong> Декомпресія (Lat Pulldown) + Сідниці + Одноручна тяга + Жим плечима 75° + Односторонній жим ногами + Нижня трапеція + Біцепс & Литки.</p>
       </div>
 
       <!-- B1 -->
-      <details class="exercise-item" open>
+      <details class="exercise-item" data-slot-id="b1" open>
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B1 • Широчайші & Декомпресія</span>
@@ -1146,7 +635,7 @@
       </details>
 
       <!-- B2 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b2">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B2 • Сідниці & Положення таза</span>
@@ -1206,7 +695,7 @@
       </details>
 
       <!-- B3 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b3">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B3 • Нижні широчайші & Стабільність</span>
@@ -1266,7 +755,7 @@
       </details>
 
       <!-- B4 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b4">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B4 • Плечі & Передній зубчастий</span>
@@ -1326,7 +815,7 @@
       </details>
 
       <!-- B5 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b5">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B5 • Квадрицепс односторонній</span>
@@ -1386,7 +875,7 @@
       </details>
 
       <!-- B6 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b6">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B6 • Нижня трапеція</span>
@@ -1445,7 +934,7 @@
       </details>
 
       <!-- B7 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b7">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B7 • Біцепс (розтягнута позиція)</span>
@@ -1505,7 +994,7 @@
       </details>
 
       <!-- B8 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="b8">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа B8 • Литки (без осьового тиску)</span>
@@ -1569,12 +1058,12 @@
          DAY C PANEL
          ========================================== -->
     <div id="day-c-panel" class="day-content">
-      <div class="card card-green" style="padding:12px 14px;">
-        <p style="margin:0; font-size:0.83rem;"><strong>Фокус Дня C:</strong> Вузька тяга з упором + Тазовий шарнір (45° Back Extension) + Широка вертикальна тяга + Горизонтальний жим + Спліт-присідання + Задня дельта + Pallof Press.</p>
+      <div class="card card-green focus-card">
+        <p><strong>Фокус Дня C:</strong> Вузька тяга з упором + Тазовий шарнір (45° Back Extension) + Широка вертикальна тяга + Горизонтальний жим + Спліт-присідання + Задня дельта + Pallof Press.</p>
       </div>
 
       <!-- C1 -->
-      <details class="exercise-item" open>
+      <details class="exercise-item" data-slot-id="c1" open>
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C1 • Товщина спини</span>
@@ -1634,7 +1123,7 @@
       </details>
 
       <!-- C2 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c2">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C2 • Сідниці, Біцепс стегна & Розгиначі</span>
@@ -1694,7 +1183,7 @@
       </details>
 
       <!-- C3 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c3">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C3 • Ширина верху спини</span>
@@ -1754,7 +1243,7 @@
       </details>
 
       <!-- C4 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c4">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C4 • Середина грудних</span>
@@ -1814,7 +1303,7 @@
       </details>
 
       <!-- C5 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c5">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C5 • Односторонні ноги & Розтяг таза</span>
@@ -1874,7 +1363,7 @@
       </details>
 
       <!-- C6 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c6">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C6 • Задня дельта (ізоляція)</span>
@@ -1934,7 +1423,7 @@
       </details>
 
       <!-- C7 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c7">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C7 • Середня дельта</span>
@@ -1981,7 +1470,7 @@
       </details>
 
       <!-- C8 -->
-      <details class="exercise-item">
+      <details class="exercise-item" data-slot-id="c8">
         <summary class="exercise-header">
           <div class="exercise-title-group">
             <span class="exercise-number">Вправа C8 • Антиротація кора & Литки</span>
@@ -2163,25 +1652,61 @@
       </ul>
     </div>
   </section>
+
+  <!-- ==========================================
+       TAB 5: WORKOUT HISTORY & BACKUP
+       ========================================== -->
+  <section id="tab-history" class="section-tab" aria-labelledby="history-title">
+    <div class="card card-highlight">
+      <div class="history-heading">
+        <div>
+          <h2 id="history-title">Історія тренувань</h2>
+          <p>Фактичні підходи, робоча вага та повторення за датою.</p>
+        </div>
+        <button id="add-past-workout" class="action-btn action-secondary" type="button">Додати минуле</button>
+      </div>
+      <div id="history-filters" class="history-filters" aria-label="Фільтри історії"></div>
+      <div id="history-list" class="history-list" aria-live="polite">
+        <p class="empty-state">Історія з’явиться після першого завершеного тренування.</p>
+      </div>
+    </div>
+
+    <div class="card card-purple" aria-labelledby="backup-title">
+      <h2 id="backup-title">Резервна копія</h2>
+      <p>Історія зберігається лише в цьому браузері. Експортуй JSON, щоб перенести або відновити дані.</p>
+      <div class="backup-actions">
+        <button id="export-backup" class="action-btn action-primary" type="button">Експортувати JSON</button>
+        <label class="action-btn action-secondary file-action" for="import-backup">Імпортувати JSON</label>
+        <input id="import-backup" class="visually-hidden" type="file" accept="application/json,.json">
+      </div>
+      <output id="backup-status" class="backup-status" aria-live="polite"></output>
+    </div>
+
+    <div id="history-detail" class="card history-detail" hidden aria-live="polite"></div>
+  </section>
 </main>
 
 <!-- PURE CSS BOTTOM NAVIGATION LABELS -->
-<nav class="nav-bar">
-  <label for="nav-workout" class="nav-btn">
+<nav class="nav-bar" role="tablist" aria-label="Розділи застосунку">
+  <label for="nav-workout" class="nav-btn" role="tab" tabindex="0" aria-selected="true" aria-controls="tab-workout">
     <svg viewBox="0 0 24 24"><path d="M6 4v16M18 4v16M2 8h4M18 8h4M2 16h4M18 16h4M6 12h12"/></svg>
     Програма
   </label>
-  <label for="nav-strategy" class="nav-btn">
+  <label for="nav-strategy" class="nav-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="tab-strategy">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
     ЦНС & Розминка
   </label>
-  <label for="nav-recomp" class="nav-btn">
+  <label for="nav-recomp" class="nav-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="tab-recomp">
     <svg viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
     Живіт & М'язи
   </label>
-  <label for="nav-progression" class="nav-btn">
+  <label for="nav-progression" class="nav-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="tab-progression">
     <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
     Прогресія
+  </label>
+  <label for="nav-history" class="nav-btn" role="tab" tabindex="0" aria-selected="false" aria-controls="tab-history">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+    Історія
   </label>
 </nav>
 
