@@ -153,6 +153,16 @@ try {
     mobile: true,
   });
 
+  await cdp.send("Page.navigate", { url: seedUrl });
+  const seedOrigin = new URL(seedUrl).origin;
+  let seedDocumentReady = false;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    seedDocumentReady = await evaluate(cdp, `location.origin === ${JSON.stringify(seedOrigin)} && document.readyState === 'complete'`);
+    if (seedDocumentReady) break;
+    await delay(50);
+  }
+  assert.equal(seedDocumentReady, true, "Seed page did not commit a ready same-origin document");
+
   const seeded = await evaluate(cdp, `(async () => {
     const request = indexedDB.open('workout-program', 1);
     const database = await new Promise((resolve, reject) => {
@@ -451,8 +461,162 @@ try {
   assert.ok(result.dateFontSize >= 16);
   assert.equal(result.resumedProgram, 'athlete-full-body-3x');
   assert.equal(result.hasHorizontalOverflow, false);
+
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    (() => {
+      const users = {
+        'a@example.com': { id: '11111111-1111-4111-8111-111111111111', email: 'a@example.com' },
+        'b@example.com': { id: '22222222-2222-4222-8222-222222222222', email: 'b@example.com' },
+      };
+      const state = { session: null, listeners: [], rows: new Map() };
+      const notify = (event) => state.listeners.forEach((callback) => callback(event, state.session));
+      const client = {
+        auth: {
+          getSession: async () => ({ data: { session: state.session }, error: null }),
+          onAuthStateChange: (callback) => {
+            state.listeners.push(callback);
+            return { data: { subscription: { unsubscribe() {} } } };
+          },
+          signInWithPassword: async ({ email }) => {
+            const user = users[email];
+            if (!user) return { data: null, error: new Error('Unknown mock user') };
+            state.session = { user };
+            notify('SIGNED_IN');
+            return { data: { user, session: state.session }, error: null };
+          },
+          signUp: async ({ email }) => ({ data: { user: users[email] || null, session: null }, error: null }),
+          signOut: async () => {
+            state.session = null;
+            notify('SIGNED_OUT');
+            return { error: null };
+          },
+          resetPasswordForEmail: async () => ({ error: null }),
+          updateUser: async () => ({ data: { user: state.session?.user || null }, error: null }),
+        },
+        from() {
+          const query = { operation: 'read', payload: null, filters: {} };
+          const builder = {
+            select() { return builder; },
+            eq(column, value) { query.filters[column] = value; return builder; },
+            insert(payload) { query.operation = 'insert'; query.payload = payload; return builder; },
+            update(payload) { query.operation = 'update'; query.payload = payload; return builder; },
+            async maybeSingle() {
+              const userId = query.filters.user_id;
+              const current = state.rows.get(userId) || null;
+              if (query.operation === 'update') {
+                if (!current || current.revision !== query.filters.revision) return { data: null, error: null };
+                const next = { ...current, ...query.payload };
+                state.rows.set(userId, next);
+                return { data: next, error: null };
+              }
+              return { data: current, error: null };
+            },
+            async single() {
+              if (query.operation !== 'insert') return { data: null, error: new Error('Unexpected mock single') };
+              const row = { ...query.payload, updated_at: 'mock-' + query.payload.revision };
+              state.rows.set(row.user_id, row);
+              return { data: row, error: null };
+            },
+          };
+          return builder;
+        },
+      };
+      window.__mockCloudState = state;
+      window.__WORKOUT_CLOUD_TEST__ = {
+        config: {
+          supabaseUrl: 'https://mock.supabase.co',
+          supabasePublishableKey: 'sb_publishable_mock',
+          table: 'workout_snapshots',
+        },
+        createClient: () => client,
+      };
+    })();
+  ` });
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await delay(400);
+
+  const accountResult = await evaluate(cdp, `(async () => {
+    const waitFor = async (check, message) => {
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        if (check()) return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error(message);
+    };
+    await waitFor(() => document.querySelector('#account-login') && !document.querySelector('#account-login').disabled, 'Configured account UI did not boot');
+    document.querySelector('label[for="nav-history"]').click();
+    const guestCount = document.querySelectorAll('#history-list .history-item').length;
+    document.querySelector('#account-email').value = 'a@example.com';
+    document.querySelector('#account-password').value = 'password';
+    document.querySelector('#account-register').click();
+    await waitFor(() => document.querySelector('#cloud-status').textContent.includes('Підтвердь email'), 'Email confirmation state missing');
+    const confirmationState = document.querySelector('#cloud-status').textContent;
+    document.querySelector('#account-reset').click();
+    await waitFor(() => document.querySelector('#cloud-status').textContent.includes('відновлення пароля'), 'Password reset state missing');
+    const resetState = document.querySelector('#cloud-status').textContent;
+    const login = async (email) => {
+      document.querySelector('#account-email').value = email;
+      document.querySelector('#account-password').value = 'password';
+      document.querySelector('#account-login').click();
+      await waitFor(() => document.querySelector('#account-summary').textContent.includes(email), 'Account did not sign in: ' + email);
+    };
+    await login('a@example.com');
+    await waitFor(() => !document.querySelector('#transfer-guest-history').hidden, 'Explicit guest transfer action missing');
+    const accountBeforeTransfer = document.querySelectorAll('#history-list .history-item').length;
+    window.confirm = () => true;
+    document.querySelector('#transfer-guest-history').click();
+    await waitFor(() => document.querySelectorAll('#history-list .history-item').length === guestCount, 'Guest history was not explicitly transferred');
+    const accountAfterTransfer = document.querySelectorAll('#history-list .history-item').length;
+    const beforeAccountDelete = accountAfterTransfer;
+    document.querySelector('#history-list .history-item .action-danger').click();
+    await waitFor(() => document.querySelectorAll('#history-list .history-item').length === beforeAccountDelete - 1, 'Account-only delete failed');
+    const accountAfterDelete = document.querySelectorAll('#history-list .history-item').length;
+    document.querySelector('#history-list .history-item .action-secondary').click();
+    const accountDetailWasVisible = !document.querySelector('#history-detail').hidden && document.querySelector('#history-detail').textContent.length > 0;
+    document.querySelector('#account-logout').click();
+    await waitFor(() => document.querySelector('#account-summary').textContent.includes('гостьовий'), 'Logout did not switch to guest');
+    const guestAfterLogout = document.querySelectorAll('#history-list .history-item').length;
+    const accountDetailClearedOnLogout = document.querySelector('#history-detail').hidden && document.querySelector('#history-detail').textContent === '';
+    await login('b@example.com');
+    const userBBeforeTransfer = document.querySelectorAll('#history-list .history-item').length;
+    const dbNames = (await indexedDB.databases()).map((item) => item.name).sort();
+    return {
+      guestCount,
+      accountBeforeTransfer,
+      accountAfterTransfer,
+      accountAfterDelete,
+      accountDetailWasVisible,
+      accountDetailClearedOnLogout,
+      guestAfterLogout,
+      userBBeforeTransfer,
+      transferVisibleForB: !document.querySelector('#transfer-guest-history').hidden,
+      summary: document.querySelector('#account-summary').textContent,
+      cloudStatus: document.querySelector('#cloud-status').textContent,
+      confirmationState,
+      resetState,
+      remoteRows: window.__mockCloudState.rows.size,
+      dbNames,
+    };
+  })()`);
+
+  assert.ok(accountResult.guestCount > 0);
+  assert.equal(accountResult.accountBeforeTransfer, 0);
+  assert.equal(accountResult.accountAfterTransfer, accountResult.guestCount);
+  assert.equal(accountResult.accountAfterDelete, accountResult.accountAfterTransfer - 1);
+  assert.equal(accountResult.accountDetailWasVisible, true);
+  assert.equal(accountResult.accountDetailClearedOnLogout, true);
+  assert.equal(accountResult.guestAfterLogout, accountResult.guestCount);
+  assert.equal(accountResult.userBBeforeTransfer, 0);
+  assert.equal(accountResult.transferVisibleForB, true);
+  assert.match(accountResult.summary, /b@example\.com/);
+  assert.match(accountResult.confirmationState, /Підтвердь email/);
+  assert.match(accountResult.resetState, /відновлення пароля/);
+  assert.ok(accountResult.remoteRows >= 2);
+  assert.ok(accountResult.dbNames.includes('workout-program'));
+  assert.ok(accountResult.dbNames.includes('workout-program-user-11111111-1111-4111-8111-111111111111'));
+  assert.ok(accountResult.dbNames.includes('workout-program-user-22222222-2222-4222-8222-222222222222'));
   assert.deepEqual(cdp.exceptions, []);
-  console.log(`PASS browser smoke: ${JSON.stringify(result)}`);
+  console.log(`PASS browser smoke: ${JSON.stringify({ guest: result, account: accountResult })}`);
   cdp.socket.close();
 } finally {
   await new Promise((resolve) => server.close(resolve));

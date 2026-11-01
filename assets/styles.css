@@ -1051,6 +1051,30 @@
   .confirm-set span { font-weight: 900; }
   .status-error { color: #fca5a5 !important; }
 
+  .account-card { border-left: 4px solid #38bdf8; }
+
+  .account-form,
+  .account-tools {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .account-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+  }
+
+  .account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    grid-column: 1 / -1;
+  }
+
+  #cloud-status { display: block; margin-top: 10px; }
+
   .guide-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1086,7 +1110,8 @@
     .app-header .header-actions { margin-right: 0; }
     .app-header p { display: none; }
     .picker-grid,
-    .guide-grid { grid-template-columns: 1fr; }
+    .guide-grid,
+    .account-form { grid-template-columns: 1fr; }
     .guide-wide { grid-column: auto; }
     .section-heading { align-items: stretch; flex-direction: column; }
     .set-row { grid-template-columns: 28px minmax(72px, 1fr) minmax(72px, 1fr) auto; }

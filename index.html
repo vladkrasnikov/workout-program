@@ -69,6 +69,34 @@
         <div id="history-list" class="history-list" aria-live="polite"></div>
       </div>
       <div id="history-detail" class="card history-detail" hidden aria-live="polite"></div>
+      <section class="card account-card" aria-labelledby="account-title">
+        <div class="section-heading">
+          <div><h2 id="account-title">Акаунт і хмарна копія</h2><p id="account-summary">Локальний гостьовий профіль.</p></div>
+          <button id="account-logout" class="action-btn action-secondary" type="button" hidden>Вийти</button>
+        </div>
+        <form id="account-form" class="account-form">
+          <label class="field-label" for="account-email">Email<input id="account-email" type="email" autocomplete="email" required></label>
+          <label class="field-label" for="account-password">Пароль<input id="account-password" type="password" autocomplete="current-password" minlength="6" required></label>
+          <div class="account-actions">
+            <button id="account-login" class="action-btn action-primary" type="submit">Увійти</button>
+            <button id="account-register" class="action-btn action-secondary" type="button">Зареєструватися</button>
+            <button id="account-reset" class="action-btn action-secondary" type="button">Відновити пароль</button>
+          </div>
+        </form>
+        <form id="password-recovery-form" class="account-form" hidden>
+          <label class="field-label" for="account-new-password">Новий пароль<input id="account-new-password" type="password" autocomplete="new-password" minlength="6" required></label>
+          <button class="action-btn action-primary" type="submit">Зберегти новий пароль</button>
+        </form>
+        <div id="account-tools" class="account-tools" hidden>
+          <button id="transfer-guest-history" class="action-btn action-secondary" type="button" hidden>Перенести гостьову історію в акаунт</button>
+          <div id="sync-conflict-actions" class="account-actions" hidden>
+            <span>Є конфлікт локальної та хмарної історії.</span>
+            <button id="sync-use-local" class="action-btn action-secondary" type="button">Використати локальну</button>
+            <button id="sync-use-cloud" class="action-btn action-secondary" type="button">Використати хмарну</button>
+          </div>
+        </div>
+        <output id="cloud-status" class="backup-status" aria-live="polite"></output>
+      </section>
       <section class="card backup-card" aria-labelledby="backup-title">
         <h2 id="backup-title">Резервна копія</h2>
         <p>Дані живуть у браузері. JSON переносить історію між пристроями та доменами.</p>

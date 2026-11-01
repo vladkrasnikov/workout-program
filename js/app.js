@@ -6,12 +6,21 @@ import {
 import {
   RevisionConflictError, deleteSession, exportAllData, getSetting, listEntries,
   listEntriesForSession, listSessions, putEntry, putSession, putSetting,
+  scopeHasWorkoutData, setStorageScope,
 } from "./storage.js";
 import { createBackup, downloadBackup, planMerge, restoreBackup, validateBackup } from "./backup.js";
 import {
   formatEntryResult, formatWorkoutDate, renderExerciseHistory, renderHistoryFilters,
   renderSessionDetail, renderSessionList,
 } from "./history.js";
+import cloudConfig from "./cloud-config.js";
+import { createSupabaseAuth, isCloudConfigured } from "./auth.js";
+import {
+  applyScopeTransfer, createBrowserSyncMetaStore, createCloudSync,
+  createScopedLocalSnapshotStore, createSupabaseSnapshotStore, prepareScopeTransfer,
+} from "./cloud-sync.js";
+
+const CLOUD_SCOPE_HINT_KEY = "workout-program:account-scope";
 
 const state = {
   active: null,
@@ -24,6 +33,18 @@ const state = {
   saveQueues: new Map(),
   dirtyEntries: new Set(),
   saveBlocked: false,
+  cloud: {
+    auth: null,
+    session: null,
+    user: null,
+    sync: null,
+    syncPromise: Promise.resolve(),
+    conflict: null,
+    configured: false,
+    config: cloudConfig,
+    sdkError: null,
+    switching: false,
+  },
 };
 
 const byId = (id) => document.getElementById(id);
@@ -56,6 +77,248 @@ function reportError(error, target = "save") {
   if (target === "backup") setBackupStatus(message, true);
   else setStatus(message, true);
   console.error(error);
+}
+
+function setCloudStatus(message, isError = false) {
+  const output = byId("cloud-status");
+  if (!output) return;
+  output.textContent = message;
+  output.classList.toggle("status-error", isError);
+}
+
+function accountHint() {
+  try { return JSON.parse(localStorage.getItem(CLOUD_SCOPE_HINT_KEY) ?? "null"); } catch { return null; }
+}
+
+function saveAccountHint(user) {
+  if (!user?.id) return;
+  localStorage.setItem(CLOUD_SCOPE_HINT_KEY, JSON.stringify({ id: user.id, email: user.email ?? "" }));
+}
+
+function clearAccountHint() {
+  localStorage.removeItem(CLOUD_SCOPE_HINT_KEY);
+}
+
+function resetInMemoryWorkoutState() {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = null;
+  for (const timer of state.saveTimers.values()) clearTimeout(timer);
+  state.saveTimers.clear();
+  state.saveQueues.clear();
+  state.dirtyEntries.clear();
+  state.saveBlocked = false;
+  state.active = null;
+  state.sessions = [];
+  state.entries = [];
+  byId("history-list")?.replaceChildren();
+  byId("exercise-list")?.replaceChildren();
+  if (byId("active-session-summary")) byId("active-session-summary").textContent = "Перемикання локального профілю…";
+  const detail = byId("history-detail");
+  if (detail) {
+    detail.hidden = true;
+    detail.replaceChildren();
+  }
+  setBackupStatus("");
+}
+
+function makeSyncFor(userId) {
+  if (!state.cloud.auth?.client) return null;
+  return createCloudSync({
+    remote: createSupabaseSnapshotStore(state.cloud.auth.client, { userId, table: state.cloud.config.table }),
+    local: createScopedLocalSnapshotStore(userId),
+    meta: createBrowserSyncMetaStore(userId),
+  });
+}
+
+async function loadCurrentScope({ render = true } = {}) {
+  state.active = await getActiveSession();
+  await refreshData();
+  const programId = state.active?.session.programId ?? await getSetting("currentProgramId");
+  selectProgram(programId, state.active?.session.dayId);
+  if (render) {
+    renderJournal();
+    renderHistory();
+  }
+}
+
+async function switchStorageProfile(user, { sync = true } = {}) {
+  if (state.cloud.switching) return;
+  state.cloud.switching = true;
+  try {
+    if (state.active || state.dirtyEntries.size) await flushSaves().catch((error) => console.warn("Pending guest save was not transferred", error));
+    resetInMemoryWorkoutState();
+    state.cloud.user = user ?? null;
+    state.cloud.session = user ? state.cloud.session : null;
+    setStorageScope(user?.id ?? "guest");
+    state.cloud.sync = user?.id ? makeSyncFor(user.id) : null;
+    state.cloud.conflict = null;
+    await loadCurrentScope({ render: false });
+    if (sync && state.cloud.sync && navigator.onLine !== false) await runCloudSync("вхід");
+    await loadCurrentScope();
+    renderAccount();
+    await updateTransferAvailability();
+  } finally {
+    state.cloud.switching = false;
+  }
+}
+
+function renderAccount() {
+  const configured = state.cloud.configured;
+  const signedIn = Boolean(state.cloud.user?.id);
+  const form = byId("account-form");
+  const logout = byId("account-logout");
+  const tools = byId("account-tools");
+  const conflict = byId("sync-conflict-actions");
+  form.hidden = signedIn;
+  [...form.elements].forEach((control) => { control.disabled = !configured; });
+  logout.hidden = !signedIn;
+  tools.hidden = !signedIn;
+  conflict.hidden = !state.cloud.conflict;
+  if (signedIn) {
+    byId("account-summary").textContent = `${state.cloud.user.email || "Акаунт"} · окремий локальний профіль`;
+  } else if (!configured) {
+    byId("account-summary").textContent = "Локальний гостьовий профіль. Хмарна реєстрація не налаштована.";
+    if (!state.cloud.sdkError) setCloudStatus("Дані зберігаються лише в цьому браузері.");
+  } else {
+    byId("account-summary").textContent = "Локальний гостьовий профіль. Увійди, щоб увімкнути хмарну копію.";
+  }
+}
+
+async function updateTransferAvailability() {
+  const button = byId("transfer-guest-history");
+  if (!button) return;
+  button.hidden = !state.cloud.user || !(await scopeHasWorkoutData("guest"));
+}
+
+async function runCloudSync(reason = "зміни") {
+  if (!state.cloud.sync || !state.cloud.user) return { status: "guest" };
+  const sync = state.cloud.sync;
+  const userId = state.cloud.user.id;
+  const task = state.cloud.syncPromise.catch(() => {}).then(async () => {
+    if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return { status: "stale" };
+    setCloudStatus(`Синхронізація: ${reason}…`);
+    try {
+      if (state.dirtyEntries.size) await flushSaves();
+      const result = await sync.sync();
+      if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return { ...result, stale: true };
+      if (result.status === "conflict") {
+        state.cloud.conflict = result;
+        renderAccount();
+        setCloudStatus("Конфлікт: обери локальну або хмарну версію.", true);
+      } else if (result.status === "offline") {
+        setCloudStatus("Офлайн: зміни збережені локально й синхронізуються пізніше.");
+      } else {
+        state.cloud.conflict = null;
+        setCloudStatus(`Хмарна копія актуальна (${result.status}).`);
+        if (result.status === "pulled") await loadCurrentScope();
+        renderAccount();
+      }
+      return result;
+    } catch (error) {
+      setCloudStatus(`Помилка синхронізації: ${error.message}`, true);
+      console.error(error);
+      return { status: "error", error };
+    }
+  });
+  state.cloud.syncPromise = task;
+  return task;
+}
+
+let syncTimer = null;
+function scheduleCloudSync(reason = "редагування") {
+  if (!state.cloud.sync) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => void runCloudSync(reason), 700);
+}
+
+async function resolveSyncConflict(strategy) {
+  if (!state.cloud.sync || !state.cloud.conflict) return;
+  const sync = state.cloud.sync;
+  const userId = state.cloud.user?.id;
+  const conflict = state.cloud.conflict;
+  try {
+    const result = await sync.resolveConflict(strategy, conflict);
+    if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return;
+    if (result.status === "conflict") {
+      state.cloud.conflict = result;
+      renderAccount();
+      setCloudStatus("Хмара змінилася ще раз. Перевір конфлікт повторно.", true);
+      return;
+    }
+    state.cloud.conflict = null;
+    await loadCurrentScope();
+    renderAccount();
+    setCloudStatus(strategy === "local" ? "Локальну версію записано в хмару." : "Хмарну версію завантажено.");
+  } catch (error) {
+    setCloudStatus(error.message, true);
+  }
+}
+
+async function applyAuthSession(session, event = "SESSION") {
+  const user = session?.user ?? null;
+  state.cloud.session = session ?? null;
+  if (user) {
+    saveAccountHint(user);
+    if (state.cloud.user?.id !== user.id) await switchStorageProfile(user);
+    else {
+      state.cloud.user = user;
+      renderAccount();
+    }
+    if (event === "PASSWORD_RECOVERY") byId("password-recovery-form").hidden = false;
+  } else if (event === "SIGNED_OUT" || state.cloud.user) {
+    clearAccountHint();
+    await switchStorageProfile(null, { sync: false });
+    setCloudStatus("Вихід виконано. Відкрито гостьовий локальний профіль.");
+  }
+}
+
+async function initializeCloud() {
+  const test = globalThis.__WORKOUT_CLOUD_TEST__;
+  const config = test?.config ?? cloudConfig;
+  state.cloud.config = config;
+  state.cloud.configured = isCloudConfigured(config);
+  if (!state.cloud.configured) {
+    setStorageScope("guest");
+    renderAccount();
+    return;
+  }
+  try {
+    const createClient = test?.createClient ?? (await import(config.supabaseClientUrl || cloudConfig.supabaseClientUrl)).createClient;
+    state.cloud.auth = createSupabaseAuth({ config, createClient });
+    const session = await state.cloud.auth.getSession();
+    if (session?.user) {
+      state.cloud.session = session;
+      state.cloud.user = session.user;
+      saveAccountHint(session.user);
+      setStorageScope(session.user.id);
+      state.cloud.sync = makeSyncFor(session.user.id);
+    } else {
+      clearAccountHint();
+      setStorageScope("guest");
+    }
+    state.cloud.auth.onAuthStateChange((event, nextSession) => {
+      setTimeout(() => void applyAuthSession(nextSession, event), 0);
+    });
+  } catch (error) {
+    state.cloud.sdkError = error;
+    const hint = accountHint();
+    if (hint?.id) {
+      try {
+        setStorageScope(hint.id);
+        state.cloud.user = hint;
+        setCloudStatus("Хмарний сервіс недоступний. Відкрито кеш цього акаунта офлайн.", true);
+      } catch {
+        clearAccountHint();
+        state.cloud.user = null;
+        setStorageScope("guest");
+        setCloudStatus(`Хмара недоступна: ${error.message}. Гостьові дані працюють локально.`, true);
+      }
+    } else {
+      setStorageScope("guest");
+      setCloudStatus(`Хмара недоступна: ${error.message}. Гостьові дані працюють локально.`, true);
+    }
+  }
+  renderAccount();
 }
 
 function currentProgram() {
@@ -140,6 +403,7 @@ function persistEntry(entry) {
     current.updatedAt = saved.updatedAt;
     state.saveBlocked = false;
     setStatus("Збережено");
+    scheduleCloudSync("редагування підходів");
     return saved;
   }).catch((error) => {
     state.saveBlocked = error instanceof RevisionConflictError;
@@ -535,6 +799,7 @@ async function completeWorkout() {
     await finishSession(state.active.session, state.active.entries);
     state.active = null;
     await refreshData();
+    await runCloudSync("завершення тренування");
     renderJournal();
     renderHistory();
     setStatus("Тренування збережено в історії");
@@ -568,6 +833,7 @@ const historyHandlers = {
       await refreshData();
       renderJournal();
       renderHistory();
+      await runCloudSync("редагування тренування");
       setStatus("Історичне тренування відкрито для редагування");
     } catch (error) { reportError(error); }
   },
@@ -583,6 +849,7 @@ const historyHandlers = {
       await refreshData();
       renderJournal();
       renderHistory();
+      await runCloudSync("видалення тренування");
       setStatus("Тренування видалено");
     } catch (error) { reportError(error); }
   },
@@ -618,6 +885,7 @@ async function importBackup(file) {
     selectProgram(programId, state.active?.session.dayId);
     renderJournal();
     renderHistory();
+    await runCloudSync("імпорт резервної копії");
     setBackupStatus(`Імпортовано нових записів: ${merge.additions}; дублів: ${merge.duplicates.length}`);
   } catch (error) { reportError(error, "backup"); }
   finally { byId("import-backup").value = ""; }
@@ -635,6 +903,83 @@ function renderProgramGuide() {
     );
     return item;
   }));
+}
+
+async function signIn(event) {
+  event.preventDefault();
+  if (!state.cloud.auth) return;
+  try {
+    const result = await state.cloud.auth.signIn({
+      email: byId("account-email").value.trim(),
+      password: byId("account-password").value,
+    });
+    byId("account-password").value = "";
+    await applyAuthSession(result.session ?? (result.user ? { user: result.user } : null), "SIGNED_IN");
+    setCloudStatus("Вхід виконано. Локальний профіль акаунта ізольовано від гостьового.");
+  } catch (error) { setCloudStatus(error.message, true); }
+}
+
+async function registerAccount() {
+  if (!state.cloud.auth || !byId("account-form").reportValidity()) return;
+  try {
+    const result = await state.cloud.auth.signUp({
+      email: byId("account-email").value.trim(),
+      password: byId("account-password").value,
+    });
+    byId("account-password").value = "";
+    if (result.session) await applyAuthSession(result.session, "SIGNED_IN");
+    else setCloudStatus("Реєстрацію створено. Підтвердь email за посиланням у листі, потім увійди.");
+  } catch (error) { setCloudStatus(error.message, true); }
+}
+
+async function requestPasswordReset() {
+  const email = byId("account-email");
+  if (!state.cloud.auth || !email.reportValidity()) return;
+  try {
+    await state.cloud.auth.resetPasswordForEmail(email.value.trim());
+    setCloudStatus("Посилання для відновлення пароля надіслано на email.");
+  } catch (error) { setCloudStatus(error.message, true); }
+}
+
+async function updateRecoveredPassword(event) {
+  event.preventDefault();
+  const password = byId("account-new-password");
+  if (!state.cloud.auth || !password.reportValidity()) return;
+  try {
+    await state.cloud.auth.updatePassword(password.value);
+    byId("password-recovery-form").hidden = true;
+    password.value = "";
+    setCloudStatus("Новий пароль збережено.");
+  } catch (error) { setCloudStatus(error.message, true); }
+}
+
+async function logoutAccount() {
+  try {
+    if (state.cloud.auth) await state.cloud.auth.signOut();
+  } catch (error) {
+    console.warn("Cloud sign-out failed; local profile is still closed", error);
+  } finally {
+    clearAccountHint();
+    await switchStorageProfile(null, { sync: false });
+    setCloudStatus("Вихід виконано. Дані акаунта приховано; відкрито гостьовий профіль.");
+  }
+}
+
+async function transferGuestHistory() {
+  if (!state.cloud.user) return;
+  if (!confirm("Перенести гостьову локальну історію в цей акаунт? Дані не переносяться автоматично.")) return;
+  try {
+    const plan = await prepareScopeTransfer(state.cloud.user.id);
+    if (plan.conflicts.length) {
+      setCloudStatus(`Перенесення зупинено: ${plan.conflicts.length} конфліктів стабільних ID. Експортуй резервні копії та виріши їх окремо.`, true);
+      return;
+    }
+    await applyScopeTransfer(state.cloud.user.id, plan, { confirmed: true });
+    await loadCurrentScope();
+    await runCloudSync("перенесення гостьової історії");
+    byId("transfer-guest-history").hidden = true;
+    setCloudStatus("Гостьову історію перенесено в акаунт і поставлено на синхронізацію.");
+  } catch (error) { setCloudStatus(error.message, true); }
 }
 
 function wireControls() {
@@ -661,6 +1006,14 @@ function wireControls() {
   });
   byId("export-backup").addEventListener("click", exportBackup);
   byId("import-backup").addEventListener("change", (event) => importBackup(event.target.files?.[0]));
+  byId("account-form").addEventListener("submit", signIn);
+  byId("account-register").addEventListener("click", registerAccount);
+  byId("account-reset").addEventListener("click", requestPasswordReset);
+  byId("account-logout").addEventListener("click", logoutAccount);
+  byId("password-recovery-form").addEventListener("submit", updateRecoveredPassword);
+  byId("transfer-guest-history").addEventListener("click", transferGuestHistory);
+  byId("sync-use-local").addEventListener("click", () => resolveSyncConflict("local"));
+  byId("sync-use-cloud").addEventListener("click", () => resolveSyncConflict("cloud"));
   document.querySelectorAll('input[name="main-nav"]').forEach((radio) => radio.addEventListener("change", updateTabAria));
   document.querySelectorAll('.bottom-nav label[role="tab"]').forEach((label) => {
     label.addEventListener("keydown", (event) => {
@@ -720,16 +1073,20 @@ async function boot() {
   renderProgramGuide();
   updateTabAria();
   updateConnectionStatus();
-  addEventListener("online", updateConnectionStatus);
+  addEventListener("online", () => {
+    updateConnectionStatus();
+    void runCloudSync("відновлення мережі");
+  });
   addEventListener("offline", updateConnectionStatus);
   try {
-    state.active = await getActiveSession();
-    await refreshData();
-    const programId = state.active?.session.programId ?? await getSetting("currentProgramId");
-    selectProgram(programId, state.active?.session.dayId);
+    await initializeCloud();
+    await loadCurrentScope({ render: false });
+    if (state.cloud.sync) await runCloudSync("запуск");
     if (state.active) setStatus("Незавершене тренування відновлено");
     renderJournal();
     renderHistory();
+    renderAccount();
+    await updateTransferAvailability();
   } catch (error) {
     reportError(error);
     byId("start-workout").disabled = true;
