@@ -39,9 +39,8 @@ jobs:
         run: npm test
       - name: Check JavaScript syntax
         run: |
-          for file in js/*.js sw.js; do
-            node --check "$file"
-          done
+          find js -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+          node --check sw.js
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Prepare public site

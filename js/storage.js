@@ -1,5 +1,32 @@
+import { LEGACY_PROGRAM_ID, migrateLegacyData } from "./migrations.js";
+
 export const DB_NAME = "workout-program";
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
+export const GUEST_STORAGE_SCOPE = "guest";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let activeStorageScope = GUEST_STORAGE_SCOPE;
+
+export function normalizeStorageScope(scope = GUEST_STORAGE_SCOPE) {
+  if (scope === null || scope === undefined || scope === "" || scope === GUEST_STORAGE_SCOPE) return GUEST_STORAGE_SCOPE;
+  const value = String(scope).trim().toLowerCase().replace(/^user:/, "");
+  if (!UUID_PATTERN.test(value)) throw new Error("Некоректний ідентифікатор локального профілю");
+  return value;
+}
+
+export function databaseNameForScope(scope = activeStorageScope) {
+  const normalized = normalizeStorageScope(scope);
+  return normalized === GUEST_STORAGE_SCOPE ? DB_NAME : `${DB_NAME}-user-${normalized}`;
+}
+
+export function setStorageScope(scope = GUEST_STORAGE_SCOPE) {
+  activeStorageScope = normalizeStorageScope(scope);
+  return activeStorageScope;
+}
+
+export function getStorageScope() {
+  return activeStorageScope;
+}
 
 export class RevisionConflictError extends Error {
   constructor(entity, id, expected, actual) {
@@ -23,27 +50,79 @@ const transactionDone = (transaction) => new Promise((resolve, reject) => {
   transaction.onabort = () => reject(transaction.error ?? new Error("Транзакцію скасовано"));
 });
 
-export function openDatabase() {
+export function openDatabase(scope = activeStorageScope) {
   if (!("indexedDB" in globalThis)) return Promise.reject(new Error("IndexedDB недоступна"));
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(databaseNameForScope(scope), DB_VERSION);
     request.onerror = () => reject(request.error);
     request.onblocked = () => reject(new Error("Закрийте інші вкладки для оновлення бази"));
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const tx = request.transaction;
       if (!db.objectStoreNames.contains("sessions")) {
         const sessions = db.createObjectStore("sessions", { keyPath: "id" });
         sessions.createIndex("by-workout-date", "workoutDate");
         sessions.createIndex("by-status", "status");
         sessions.createIndex("by-performed-at", "performedAt");
+        sessions.createIndex("by-program", "programId");
       }
       if (!db.objectStoreNames.contains("entries")) {
         const entries = db.createObjectStore("entries", { keyPath: "id" });
         entries.createIndex("by-session", "sessionId");
         entries.createIndex("by-exercise", ["exerciseId", "variantId", "equipmentKey"]);
-        entries.createIndex("unique-session-slot", ["sessionId", "slotId", "exerciseId"], { unique: true });
+        entries.createIndex("unique-session-slot", ["sessionId", "slotId"], { unique: true });
       }
       if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "key" });
+
+      const sessionsStore = tx.objectStore("sessions");
+      const entriesStore = tx.objectStore("entries");
+      const settingsStore = tx.objectStore("settings");
+      if (!sessionsStore.indexNames.contains("by-program")) sessionsStore.createIndex("by-program", "programId");
+      if (event.oldVersion > 0 && event.oldVersion < 2) {
+        if (entriesStore.indexNames.contains("unique-session-slot")) entriesStore.deleteIndex("unique-session-slot");
+        const abortMigration = (error) => {
+          console.error("IndexedDB migration failed", error);
+          try { tx.abort(); } catch { /* The versionchange transaction may already be aborting. */ }
+        };
+
+        const snapshot = { sessions: null, entries: null, settings: null };
+        const migrateWhenReady = () => {
+          if (!snapshot.sessions || !snapshot.entries || !snapshot.settings) return;
+          try {
+            const migrated = migrateLegacyData(snapshot);
+            migrated.sessions.forEach((session) => sessionsStore.put(session));
+            migrated.settings.forEach((setting) => settingsStore.put(setting));
+            const clearEntries = entriesStore.clear();
+            clearEntries.onsuccess = () => {
+              let entryIndex = 0;
+              const writeNextEntry = () => {
+                if (entryIndex >= migrated.entries.length) {
+                  try {
+                    entriesStore.createIndex("unique-session-slot", ["sessionId", "slotId"], { unique: true });
+                  } catch (error) {
+                    abortMigration(error);
+                  }
+                  return;
+                }
+                const writeRequest = entriesStore.put(migrated.entries[entryIndex]);
+                entryIndex += 1;
+                writeRequest.onsuccess = writeNextEntry;
+              };
+              writeNextEntry();
+            };
+          } catch (error) {
+            abortMigration(error);
+          }
+        };
+        const sessionsRequest = sessionsStore.getAll();
+        sessionsRequest.onsuccess = () => { snapshot.sessions = sessionsRequest.result; migrateWhenReady(); };
+        const entriesRequest = entriesStore.getAll();
+        entriesRequest.onsuccess = () => { snapshot.entries = entriesRequest.result; migrateWhenReady(); };
+        const settingsRequest = settingsStore.getAll();
+        settingsRequest.onsuccess = () => { snapshot.settings = settingsRequest.result; migrateWhenReady(); };
+      } else if (event.oldVersion === 0) {
+        settingsStore.put({ key: "currentProgramId", value: LEGACY_PROGRAM_ID });
+      }
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -53,8 +132,8 @@ export function openDatabase() {
   });
 }
 
-async function withTransaction(storeNames, mode, callback) {
-  const db = await openDatabase();
+async function withTransaction(storeNames, mode, callback, scope = activeStorageScope) {
+  const db = await openDatabase(scope);
   const tx = db.transaction(storeNames, mode);
   const done = transactionDone(tx);
   try {
@@ -113,15 +192,15 @@ export function deleteSession(id) {
 export const getSetting = (key) => withTransaction(["settings"], "readonly", async (tx) => (await requestAsPromise(tx.objectStore("settings").get(key)))?.value);
 export const putSetting = (key, value) => withTransaction(["settings"], "readwrite", (tx) => requestAsPromise(tx.objectStore("settings").put({ key, value })));
 
-export async function exportAllData() {
+export async function exportAllData(scope = activeStorageScope) {
   return withTransaction(["sessions", "entries", "settings"], "readonly", async (tx) => ({
     sessions: await requestAsPromise(tx.objectStore("sessions").getAll()),
     entries: await requestAsPromise(tx.objectStore("entries").getAll()),
     settings: await requestAsPromise(tx.objectStore("settings").getAll()),
-  }));
+  }), scope);
 }
 
-export function importDataAtomic(data, { replace = false } = {}) {
+export function importDataAtomic(data, { replace = false, scope = activeStorageScope } = {}) {
   return withTransaction(["sessions", "entries", "settings"], "readwrite", async (tx) => {
     const stores = {
       sessions: tx.objectStore("sessions"),
@@ -132,5 +211,16 @@ export function importDataAtomic(data, { replace = false } = {}) {
     for (const session of data.sessions) await requestAsPromise(stores.sessions.put(session));
     for (const entry of data.entries) await requestAsPromise(stores.entries.put(entry));
     for (const setting of data.settings ?? []) await requestAsPromise(stores.settings.put(setting));
-  });
+  }, scope);
+}
+
+export const exportDataForScope = (scope) => exportAllData(normalizeStorageScope(scope));
+export const importDataForScope = (scope, data, options = {}) => importDataAtomic(data, {
+  ...options,
+  scope: normalizeStorageScope(scope),
+});
+
+export async function scopeHasWorkoutData(scope = activeStorageScope) {
+  const data = await exportAllData(scope);
+  return data.sessions.length > 0 || data.entries.length > 0;
 }

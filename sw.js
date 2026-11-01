@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "workout-program-shell-";
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const BASE_URL = new URL("./", self.location.href);
 const INDEX_URL = new URL("./index.html", BASE_URL).href;
@@ -18,7 +18,16 @@ const APP_SHELL = [
   "./js/storage.js",
   "./js/workouts.js",
   "./js/history.js",
-  "./js/backup.js"
+  "./js/backup.js",
+  "./js/migrations.js",
+  "./js/catalog/index.js",
+  "./js/catalog/shared.js",
+  "./js/catalog/legacy-spine.js",
+  "./js/catalog/spine-safe.js",
+  "./js/catalog/athlete.js",
+  "./js/catalog/glute-shape.js",
+  "./js/catalog/upper-lower.js",
+  "./js/catalog/minimalist.js"
 ];
 
 self.addEventListener("install", (event) => {

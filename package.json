@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/workouts.test.js tests/backup.test.js tests/history.test.js",
+    "test": "node --test tests",
     "test:browser": "node tests/browser-smoke.mjs"
   }
 }

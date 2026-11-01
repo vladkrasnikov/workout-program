@@ -35,6 +35,7 @@ export function buildProgressSeries(targetEntry, sessions, entries, period = "al
     .filter((entry) => entry.exerciseId === targetEntry.exerciseId
       && entry.variantId === targetEntry.variantId
       && entry.equipmentKey === targetEntry.equipmentKey
+      && (entry.loadConvention ?? "total") === (targetEntry.loadConvention ?? "total")
       && entry.metric === targetEntry.metric)
     .map((entry) => ({ entry, session: sessionMap.get(entry.sessionId), value: valueFor(entry) }))
     .filter(({ session, value }) => session?.status === "completed"
@@ -138,27 +139,48 @@ function renderProgressTable(series) {
   return wrapper;
 }
 
-export function renderHistoryFilters(container, value, onChange) {
+export function renderHistoryFilters(container, filters, programs, onChange) {
   container.replaceChildren();
-  const label = element("label", { className: "field-label", text: "День" });
-  const select = element("select");
-  select.setAttribute("aria-label", "Фільтр історії за днем");
-  for (const [id, title] of [["all", "Усі"], ["a", "День A"], ["b", "День B"], ["c", "День C"]]) {
+  const programLabel = element("label", { className: "field-label", text: "Програма" });
+  const programSelect = element("select");
+  programSelect.setAttribute("aria-label", "Фільтр історії за програмою");
+  for (const [id, title] of [["all", "Усі програми"], ...programs.map((program) => [program.id, program.name])]) {
     const option = element("option", { text: title });
     option.value = id;
-    option.selected = id === value;
-    select.append(option);
+    option.selected = id === filters.programId;
+    programSelect.append(option);
   }
-  select.addEventListener("change", () => onChange(select.value));
-  label.append(select);
-  container.append(label);
+  programSelect.addEventListener("change", () => onChange({ programId: programSelect.value, dayId: "all" }));
+  programLabel.append(programSelect);
+
+  const dayLabel = element("label", { className: "field-label", text: "День" });
+  const daySelect = element("select");
+  daySelect.setAttribute("aria-label", "Фільтр історії за днем");
+  const selectedProgram = programs.find((program) => program.id === filters.programId);
+  const days = selectedProgram?.days ?? [];
+  for (const [id, title] of [["all", "Усі дні"], ...days.map((day) => [day.id, day.name])]) {
+    const option = element("option", { text: title });
+    option.value = id;
+    option.selected = id === filters.dayId;
+    daySelect.append(option);
+  }
+  daySelect.disabled = filters.programId === "all";
+  daySelect.addEventListener("change", () => onChange({ ...filters, dayId: daySelect.value }));
+  dayLabel.append(daySelect);
+  container.append(programLabel, dayLabel);
 }
 
-export function renderSessionList(container, sessions, entries, handlers = {}, dayFilter = "all") {
-  container.replaceChildren();
-  const completed = sessions
-    .filter((session) => session.status === "completed" && (dayFilter === "all" || session.dayId === dayFilter))
+export function filterCompletedSessions(sessions, filters = { programId: "all", dayId: "all" }) {
+  return sessions
+    .filter((session) => session.status === "completed"
+      && (filters.programId === "all" || session.programId === filters.programId)
+      && (filters.dayId === "all" || session.dayId === filters.dayId))
     .sort((a, b) => b.performedAt.localeCompare(a.performedAt));
+}
+
+export function renderSessionList(container, sessions, entries, handlers = {}, filters = { programId: "all", dayId: "all" }) {
+  container.replaceChildren();
+  const completed = filterCompletedSessions(sessions, filters);
 
   if (!completed.length) {
     container.append(element("p", { className: "empty-state", text: "Історія з’явиться після першого завершеного тренування." }));
@@ -173,12 +195,17 @@ export function renderSessionList(container, sessions, entries, handlers = {}, d
     const header = element("div", { className: "history-item-header" });
     const copy = element("div");
     copy.append(
-      element("strong", { text: `${formatWorkoutDate(session.workoutDate)} · День ${session.dayId.toUpperCase()}` }),
-      element("p", { text: `${confirmedCount} підтверджених підходів` }),
+      element("strong", { text: `${formatWorkoutDate(session.workoutDate)} · ${session.dayNameSnapshot || session.dayId}` }),
+      element("p", { text: `${session.programNameSnapshot || session.programId || "Програма"} · ${confirmedCount} підтверджених підходів` }),
     );
+    const actions = element("div", { className: "workout-actions" });
     const open = element("button", { className: "action-btn action-secondary", text: "Переглянути", type: "button" });
     open.addEventListener("click", () => handlers.onOpen?.(session));
-    header.append(copy, open);
+    const remove = element("button", { className: "action-btn action-danger", text: "Видалити", type: "button" });
+    remove.setAttribute("aria-label", `Видалити тренування ${formatWorkoutDate(session.workoutDate)} — ${session.programNameSnapshot || session.programId || "програма"}`);
+    remove.addEventListener("click", () => handlers.onDelete?.(session));
+    actions.append(open, remove);
+    header.append(copy, actions);
     article.append(header);
     container.append(article);
   }
@@ -188,7 +215,12 @@ export function renderSessionDetail(container, session, entries, handlers = {}) 
   container.replaceChildren();
   container.hidden = false;
   const heading = element("div", { className: "history-item-header" });
-  heading.append(element("h2", { text: `${formatWorkoutDate(session.workoutDate)} · День ${session.dayId.toUpperCase()}` }));
+  const headingCopy = element("div");
+  headingCopy.append(
+    element("h2", { text: `${formatWorkoutDate(session.workoutDate)} · ${session.dayNameSnapshot || session.dayId}` }),
+    element("p", { text: session.programNameSnapshot || session.programId || "Програма" }),
+  );
+  heading.append(headingCopy);
   const close = element("button", { className: "action-btn action-secondary", text: "Закрити", type: "button" });
   close.addEventListener("click", () => {
     container.hidden = true;

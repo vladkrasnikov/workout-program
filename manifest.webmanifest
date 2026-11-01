@@ -1,7 +1,7 @@
 {
-  "name": "Full Body 3× — журнал тренувань",
-  "short_name": "Full Body 3×",
-  "description": "Локальний журнал робочої ваги, повторень та історії прогресу.",
+  "name": "Training Hub — журнал тренувань",
+  "short_name": "Training Hub",
+  "description": "П'ять програм, локальний журнал робочої ваги, повторень та історії прогресу.",
   "lang": "uk",
   "start_url": "./",
   "scope": "./",

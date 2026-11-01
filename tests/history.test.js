@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildProgressSeries } from "../js/history.js";
+import { buildProgressSeries, filterCompletedSessions } from "../js/history.js";
 
 const makeSet = (metric, value, order = 1) => ({
   id: `${metric}-${order}`,
@@ -21,6 +21,7 @@ const makeEntry = (sessionId, metric, values) => ({
   exerciseId: "raise",
   variantId: "cable",
   equipmentKey: "default",
+  loadConvention: "total",
   metric,
   sets: values.map((value, index) => makeSet(metric, value, index + 1)),
 });
@@ -58,10 +59,26 @@ test("reps and duration series select the metric-specific maximum", () => {
   assert.equal(duration[0].value, 45);
 });
 
-test("series isolates variant and equipment", () => {
+test("series isolates variant, equipment and load convention", () => {
   const target = makeEntry("target", "load-reps", [0]);
   const matching = makeEntry("new", "load-reps", [22]);
   const otherVariant = { ...makeEntry("middle", "load-reps", [50]), variantId: "dumbbell" };
   const otherMachine = { ...makeEntry("old", "load-reps", [60]), equipmentKey: "gym-2" };
-  assert.deepEqual(buildProgressSeries(target, sessions, [matching, otherVariant, otherMachine]).map((point) => point.value), [22]);
+  const otherConvention = { ...makeEntry("sixty", "load-reps", [70]), loadConvention: "per-hand" };
+  assert.deepEqual(buildProgressSeries(target, sessions, [matching, otherVariant, otherMachine, otherConvention]).map((point) => point.value), [22]);
+});
+
+test("history list selection only includes completed sessions in the selected program and day", () => {
+  const source = [
+    { id: "draft", status: "draft", programId: "spine-safe", dayId: "a", performedAt: "2026-10-04T10:00:00.000Z" },
+    { id: "other-day", status: "completed", programId: "spine-safe", dayId: "b", performedAt: "2026-10-03T10:00:00.000Z" },
+    { id: "other-program", status: "completed", programId: "athlete-full-body-3x", dayId: "a", performedAt: "2026-10-02T10:00:00.000Z" },
+    { id: "match", status: "completed", programId: "spine-safe", dayId: "a", performedAt: "2026-10-01T10:00:00.000Z" },
+  ];
+
+  assert.deepEqual(
+    filterCompletedSessions(source, { programId: "spine-safe", dayId: "a" }).map((session) => session.id),
+    ["match"],
+  );
+  assert.equal(filterCompletedSessions(source).some((session) => session.id === "draft"), false);
 });
