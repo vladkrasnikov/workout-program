@@ -20,6 +20,8 @@ export class CloudOfflineError extends Error {
   }
 }
 
+export const LEGACY_IMPORT_MARKER_KEY = "cloudLegacyImportV1";
+
 const clone = (value) => globalThis.structuredClone
   ? globalThis.structuredClone(value)
   : JSON.parse(JSON.stringify(value));
@@ -43,6 +45,12 @@ export function normalizeSnapshot(snapshot = {}) {
 }
 
 export const snapshotFingerprint = (snapshot) => canonical(normalizeSnapshot(snapshot));
+
+const emptySnapshot = () => ({ sessions: [], entries: [], settings: [] });
+
+export function getLegacyImportMarker(snapshot) {
+  return normalizeSnapshot(snapshot).settings.find(({ key }) => key === LEGACY_IMPORT_MARKER_KEY)?.value ?? null;
+}
 
 export function isSnapshotEmpty(snapshot) {
   const normalized = normalizeSnapshot(snapshot);
@@ -148,13 +156,36 @@ const mergeFirstSync = (localSnapshot, remoteSnapshot) => {
  * Offline-first synchronization. `sync()` never overwrites when both sides changed:
  * it returns an explicit conflict for the UI to resolve.
  */
-export function createCloudSync({ remote, local, meta, isOnline = () => globalThis.navigator?.onLine !== false } = {}) {
+export function createCloudSync({
+  remote,
+  local,
+  meta,
+  isOnline = () => globalThis.navigator?.onLine !== false,
+  remoteAuthoritativeOnFirstSync = false,
+} = {}) {
   if (!remote?.read || !remote?.create || !remote?.update) throw new TypeError("Некоректне хмарне сховище");
   if (!local?.read || !local?.replace) throw new TypeError("Некоректне локальне сховище");
   if (!meta?.get || !meta?.set) throw new TypeError("Некоректне сховище стану синхронізації");
 
-  const remember = async (record, snapshot) => {
-    const next = { revision: record.revision, fingerprint: snapshotFingerprint(snapshot), updatedAt: record.updatedAt ?? null };
+  let mutationGeneration = 0;
+
+  const remember = async (record, snapshot, savedGeneration = mutationGeneration) => {
+    const fingerprint = snapshotFingerprint(snapshot);
+    const currentFingerprint = snapshotFingerprint(await local.read());
+    const latest = await meta.get();
+    const changedWhileSaving = mutationGeneration !== savedGeneration
+      || currentFingerprint !== fingerprint
+      || Boolean(latest?.pending && latest.pendingFingerprint && latest.pendingFingerprint !== fingerprint);
+    const next = {
+      revision: record.revision,
+      fingerprint,
+      updatedAt: record.updatedAt ?? null,
+      pending: changedWhileSaving,
+      ...(changedWhileSaving ? {
+        pendingFingerprint: latest?.pendingFingerprint ?? currentFingerprint,
+        pendingAt: latest?.pendingAt ?? new Date().toISOString(),
+      } : {}),
+    };
     await meta.set(next);
     return next;
   };
@@ -167,44 +198,141 @@ export function createCloudSync({ remote, local, meta, isOnline = () => globalTh
   };
 
   const push = async (snapshot, record) => {
+    const savedGeneration = mutationGeneration;
     const saved = record
       ? await remote.update(normalizeSnapshot(snapshot), record.revision)
       : await remote.create(normalizeSnapshot(snapshot));
-    await remember(saved, snapshot);
+    await remember(saved, snapshot, savedGeneration);
     return { status: "pushed", snapshot: normalizeSnapshot(snapshot), revision: saved.revision };
   };
 
-  return Object.freeze({
-    async sync() {
-      if (!isOnline()) return { status: "offline", error: new CloudOfflineError() };
-      const [localSnapshotRaw, remoteRecord, previous] = await Promise.all([local.read(), remote.read(), meta.get()]);
-      const localSnapshot = normalizeSnapshot(localSnapshotRaw);
-      const localFingerprint = snapshotFingerprint(localSnapshot);
+  const synchronize = async () => {
+    if (!isOnline()) return { status: "offline", error: new CloudOfflineError() };
+    const [localSnapshotRaw, remoteRecord, previous] = await Promise.all([local.read(), remote.read(), meta.get()]);
+    const localSnapshot = normalizeSnapshot(localSnapshotRaw);
+    const localFingerprint = snapshotFingerprint(localSnapshot);
 
-      if (!remoteRecord) return push(localSnapshot, null);
-      const remoteSnapshot = normalizeSnapshot(remoteRecord.snapshot);
+    if (!remoteRecord) {
+      if (previous?.pending || !remoteAuthoritativeOnFirstSync) return push(localSnapshot, null);
+      const initial = emptySnapshot();
+      const created = await remote.create(initial);
+      await local.replace(initial);
+      await remember(created, initial);
+      return { status: "initialized-empty", snapshot: initial, revision: created.revision };
+    }
+    const remoteSnapshot = normalizeSnapshot(remoteRecord.snapshot);
 
-      if (!previous) {
-        if (isSnapshotEmpty(localSnapshot)) return pull(remoteRecord);
+    if (!Number.isInteger(previous?.revision)) {
+      if (previous?.pending) {
         if (isSnapshotEmpty(remoteSnapshot)) return push(localSnapshot, remoteRecord);
-        const plan = mergeFirstSync(localSnapshot, remoteSnapshot);
-        if (plan.conflicts.length) {
-          return { status: "conflict", reason: "first-sync", local: localSnapshot, remote: remoteRecord, conflicts: plan.conflicts };
-        }
-        await local.replace(plan.data);
-        return push(plan.data, remoteRecord);
+        return { status: "conflict", reason: "pending-before-first-pull", local: localSnapshot, remote: remoteRecord, conflicts: [] };
+      }
+      if (remoteAuthoritativeOnFirstSync) return pull(remoteRecord);
+      if (isSnapshotEmpty(localSnapshot)) return pull(remoteRecord);
+      if (isSnapshotEmpty(remoteSnapshot)) return push(localSnapshot, remoteRecord);
+      const plan = mergeFirstSync(localSnapshot, remoteSnapshot);
+      if (plan.conflicts.length) {
+        return { status: "conflict", reason: "first-sync", local: localSnapshot, remote: remoteRecord, conflicts: plan.conflicts };
+      }
+      await local.replace(plan.data);
+      return push(plan.data, remoteRecord);
+    }
+
+    if (remoteRecord.revision === previous.revision) {
+      if (localFingerprint === previous.fingerprint && !previous.pending) {
+        await remember(remoteRecord, localSnapshot);
+        return { status: "synced", snapshot: localSnapshot, revision: remoteRecord.revision };
+      }
+      return push(localSnapshot, remoteRecord);
+    }
+
+    if (localFingerprint === previous.fingerprint && !previous.pending) return pull(remoteRecord);
+    return { status: "conflict", reason: "both-changed", local: localSnapshot, remote: remoteRecord, conflicts: [] };
+  };
+
+  return Object.freeze({
+    /**
+     * Pulls the authenticated account before showing its progress. A pending
+     * per-user queue is never discarded; it is synchronized or reported as a
+     * conflict instead.
+     */
+    async initializeFromCloud() {
+      if (!isOnline()) return { status: "offline", error: new CloudOfflineError() };
+      const previous = await meta.get();
+      if (previous?.pending) return synchronize();
+      const record = await remote.read();
+      if (record) return pull(record);
+      const initial = emptySnapshot();
+      const created = await remote.create(initial);
+      await local.replace(initial);
+      await remember(created, initial);
+      return { status: "initialized-empty", snapshot: initial, revision: created.revision };
+    },
+
+    async markPending() {
+      mutationGeneration += 1;
+      const [previous, snapshot] = await Promise.all([meta.get(), local.read()]);
+      await meta.set({
+        ...(previous ?? {}),
+        pending: true,
+        pendingFingerprint: snapshotFingerprint(snapshot),
+        pendingAt: new Date().toISOString(),
+      });
+      return { status: "pending" };
+    },
+
+    async hasPending() {
+      return Boolean((await meta.get())?.pending);
+    },
+
+    async sync() {
+      return synchronize();
+    },
+
+    /**
+     * Explicit, cloud-first one-time import of the preserved anonymous DB.
+     * The marker is written in the same cloud revision as the imported data,
+     * so a failed upload never makes the action disappear locally.
+     */
+    async importLegacy(legacySnapshot, { confirmed = false } = {}) {
+      if (!confirmed) throw new Error("Імпорт старих локальних даних потребує явного підтвердження");
+      if (!isOnline()) return { status: "offline", error: new CloudOfflineError() };
+
+      const record = await remote.read();
+      const accountSnapshot = normalizeSnapshot(record?.snapshot ?? emptySnapshot());
+      const existingMarker = getLegacyImportMarker(accountSnapshot);
+      if (existingMarker) {
+        if (record) await pull(record);
+        return { status: "already-imported", marker: existingMarker, snapshot: accountSnapshot, revision: record?.revision ?? null };
       }
 
-      if (remoteRecord.revision === previous.revision) {
-        if (localFingerprint === previous.fingerprint) {
-          await remember(remoteRecord, localSnapshot);
-          return { status: "synced", snapshot: localSnapshot, revision: remoteRecord.revision };
-        }
-        return push(localSnapshot, remoteRecord);
+      const legacy = normalizeSnapshot(legacySnapshot);
+      const plan = planMerge(accountSnapshot, legacy);
+      if (plan.conflicts.length) {
+        return {
+          status: "conflict",
+          reason: "legacy-import",
+          local: legacy,
+          remote: record,
+          conflicts: plan.conflicts,
+        };
       }
 
-      if (localFingerprint === previous.fingerprint) return pull(remoteRecord);
-      return { status: "conflict", reason: "both-changed", local: localSnapshot, remote: remoteRecord, conflicts: [] };
+      const importedAt = new Date().toISOString();
+      const marker = { version: 1, fingerprint: snapshotFingerprint(legacy), importedAt };
+      const imported = normalizeSnapshot({
+        ...plan.data,
+        settings: [
+          ...plan.data.settings.filter(({ key }) => key !== LEGACY_IMPORT_MARKER_KEY),
+          { key: LEGACY_IMPORT_MARKER_KEY, value: marker },
+        ],
+      });
+      const saved = record
+        ? await remote.update(imported, record.revision)
+        : await remote.create(imported);
+      await local.replace(imported);
+      await remember(saved, imported);
+      return { status: "imported", marker, snapshot: imported, revision: saved.revision };
     },
 
     async resolveConflict(strategy, conflict) {

@@ -220,7 +220,12 @@ export const importDataForScope = (scope, data, options = {}) => importDataAtomi
   scope: normalizeStorageScope(scope),
 });
 
+/** Read-only access to the preserved pre-account database for explicit import. */
+export const exportLegacyAnonymousData = () => exportDataForScope(GUEST_STORAGE_SCOPE);
+
 export async function scopeHasWorkoutData(scope = activeStorageScope) {
   const data = await exportAllData(scope);
   return data.sessions.length > 0 || data.entries.length > 0;
 }
+
+export const hasLegacyAnonymousData = () => scopeHasWorkoutData(GUEST_STORAGE_SCOPE);

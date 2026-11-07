@@ -1386,6 +1386,26 @@
   .program-guide-audience { color: #cbd5e1; }
   .guide-select-program { align-self: flex-start; margin-top: auto; }
 
+  .access-card,
+  .setup-message {
+    display: grid;
+    gap: 12px;
+  }
+
+  .access-card { max-width: 720px; }
+  .access-card .action-btn { justify-self: start; }
+
+  .setup-message {
+    margin: 16px 0;
+    padding: 14px;
+    color: #fde68a;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: var(--radius-sm);
+  }
+
+  .setup-message code { overflow-wrap: anywhere; }
+
   @media (max-width: 820px) {
     .journal-dashboard { grid-template-columns: 1fr; }
     .session-controls { grid-template-columns: minmax(0, 1fr) repeat(2, auto); }
@@ -1402,6 +1422,8 @@
     .picker-grid { grid-template-columns: 1fr; }
     .session-controls { grid-template-columns: 1fr; }
     .session-controls .field-label { min-width: 0; }
+    .session-heading { align-items: stretch; flex-direction: column; }
+    .save-status { min-height: 0; }
     .day-heading { align-items: stretch; flex-direction: column; }
     .day-heading p { text-align: left; }
     .app-drawer { width: min(340px, calc(100vw - 24px)); }

@@ -6,7 +6,7 @@ import {
 import {
   RevisionConflictError, deleteSession, exportAllData, getSetting, listEntries,
   listEntriesForSession, listSessions, putEntry, putSession, putSetting,
-  scopeHasWorkoutData, setStorageScope,
+  exportLegacyAnonymousData, hasLegacyAnonymousData, setStorageScope,
 } from "./storage.js";
 import { createBackup, downloadBackup, planMerge, restoreBackup, validateBackup } from "./backup.js";
 import {
@@ -16,12 +16,12 @@ import {
 import cloudConfig from "./cloud-config.js";
 import { createSupabaseAuth, isCloudConfigured } from "./auth.js";
 import {
-  applyScopeTransfer, createBrowserSyncMetaStore, createCloudSync,
-  createScopedLocalSnapshotStore, createSupabaseSnapshotStore, prepareScopeTransfer,
+  LEGACY_IMPORT_MARKER_KEY, createBrowserSyncMetaStore, createCloudSync,
+  createScopedLocalSnapshotStore, createSupabaseSnapshotStore,
 } from "./cloud-sync.js";
 
 const CLOUD_SCOPE_HINT_KEY = "workout-program:account-scope";
-const SECTION_IDS = ["journal", "history", "guide"];
+const SECTION_IDS = ["journal", "history", "guide", "account"];
 let activeSectionId = "journal";
 let activeNavigationId = "journal";
 let drawerReturnFocus = null;
@@ -48,6 +48,8 @@ const state = {
     config: cloudConfig,
     sdkError: null,
     switching: false,
+    offlineIdentity: false,
+    accessReady: false,
   },
 };
 
@@ -116,7 +118,7 @@ function resetInMemoryWorkoutState() {
   state.entries = [];
   byId("history-list")?.replaceChildren();
   byId("exercise-list")?.replaceChildren();
-  if (byId("active-session-summary")) byId("active-session-summary").textContent = "Перемикання локального профілю…";
+  if (byId("active-session-summary")) byId("active-session-summary").textContent = "Особисті дані приховано";
   const detail = byId("history-detail");
   if (detail) {
     detail.hidden = true;
@@ -131,8 +133,23 @@ function makeSyncFor(userId) {
     remote: createSupabaseSnapshotStore(state.cloud.auth.client, { userId, table: state.cloud.config.table }),
     local: createScopedLocalSnapshotStore(userId),
     meta: createBrowserSyncMetaStore(userId),
+    remoteAuthoritativeOnFirstSync: true,
   });
 }
+
+function makeOfflineSyncFor(userId) {
+  const meta = createBrowserSyncMetaStore(userId);
+  return Object.freeze({
+    async markPending() {
+      await meta.set({ ...(await meta.get() ?? {}), pending: true, pendingAt: new Date().toISOString() });
+      return { status: "pending" };
+    },
+    async hasPending() { return Boolean((await meta.get())?.pending); },
+    async sync() { return { status: "offline" }; },
+  });
+}
+
+const hasAccount = () => Boolean(state.cloud.user?.id && state.cloud.sync && state.cloud.accessReady);
 
 async function loadCurrentScope({ render = true } = {}) {
   state.active = await getActiveSession();
@@ -145,22 +162,59 @@ async function loadCurrentScope({ render = true } = {}) {
   }
 }
 
-async function switchStorageProfile(user, { sync = true } = {}) {
+async function enterReadOnlyMode({ message = "Увійдіть, щоб вести особистий журнал тренувань." } = {}) {
+  resetInMemoryWorkoutState();
+  state.cloud.user = null;
+  state.cloud.session = null;
+  state.cloud.sync = null;
+  state.cloud.conflict = null;
+  state.cloud.offlineIdentity = false;
+  state.cloud.accessReady = false;
+  setStorageScope("guest");
+  renderJournal();
+  renderHistory();
+  renderAccount();
+  setCloudStatus(message);
+}
+
+async function switchStorageProfile(user, { initialize = true } = {}) {
   if (state.cloud.switching) return;
   state.cloud.switching = true;
   try {
-    if (state.active || state.dirtyEntries.size) await flushSaves().catch((error) => console.warn("Pending guest save was not transferred", error));
+    if (state.active || state.dirtyEntries.size) await flushSaves();
     resetInMemoryWorkoutState();
-    state.cloud.user = user ?? null;
-    state.cloud.session = user ? state.cloud.session : null;
-    setStorageScope(user?.id ?? "guest");
-    state.cloud.sync = user?.id ? makeSyncFor(user.id) : null;
+    if (!user?.id) {
+      await enterReadOnlyMode();
+      return;
+    }
+    state.cloud.user = user;
+    setStorageScope(user.id);
+    state.cloud.sync = makeSyncFor(user.id);
+    state.cloud.accessReady = false;
     state.cloud.conflict = null;
-    await loadCurrentScope({ render: false });
-    if (sync && state.cloud.sync && navigator.onLine !== false) await runCloudSync("вхід");
+    if (initialize && navigator.onLine !== false) {
+      const result = await state.cloud.sync.initializeFromCloud();
+      if (result.status === "conflict") {
+        state.cloud.conflict = result;
+        setCloudStatus("Є конфлікт незбережених локальних змін і хмарної історії.", true);
+      }
+    }
+    state.cloud.accessReady = true;
     await loadCurrentScope();
     renderAccount();
-    await updateTransferAvailability();
+    await updateLegacyImportAvailability();
+    const pending = await state.cloud.sync.hasPending();
+    if (pending) setCloudStatus(navigator.onLine === false ? "Офлайн · очікує синхронізації" : "Локальні зміни очікують синхронізації.");
+    else if (navigator.onLine === false) setCloudStatus("Офлайн · відкрито кеш цього акаунта.");
+    else setCloudStatus("Збережено у хмарі.");
+  } catch (error) {
+    resetInMemoryWorkoutState();
+    state.cloud.accessReady = false;
+    renderJournal();
+    renderHistory();
+    renderAccount();
+    setCloudStatus(`Не вдалося завантажити хмарну історію: ${error.message}`, true);
+    throw error;
   } finally {
     state.cloud.switching = false;
   }
@@ -169,38 +223,74 @@ async function switchStorageProfile(user, { sync = true } = {}) {
 function renderAccount() {
   const configured = state.cloud.configured;
   const signedIn = Boolean(state.cloud.user?.id);
+  const ready = hasAccount();
   const form = byId("account-form");
   const logout = byId("account-logout");
   const tools = byId("account-tools");
+  const setup = byId("cloud-setup-message");
+  const backup = byId("backup-tools");
   const conflict = byId("sync-conflict-actions");
   form.hidden = signedIn;
   [...form.elements].forEach((control) => { control.disabled = !configured; });
   logout.hidden = !signedIn;
-  tools.hidden = !signedIn;
+  tools.hidden = !ready;
+  backup.hidden = !ready;
+  setup.hidden = configured;
   conflict.hidden = !state.cloud.conflict;
-  if (signedIn) {
-    byId("account-summary").textContent = `${state.cloud.user.email || "Акаунт"} · окремий локальний профіль`;
+  if (ready) {
+    byId("account-summary").textContent = `${state.cloud.user.email || "Акаунт"} · особиста історія синхронізується з Supabase`;
+  } else if (signedIn) {
+    byId("account-summary").textContent = `${state.cloud.user.email || "Акаунт"} · хмарну історію поки не завантажено`;
   } else if (!configured) {
-    byId("account-summary").textContent = "Локальний гостьовий профіль. Хмарна реєстрація не налаштована.";
-    if (!state.cloud.sdkError) setCloudStatus("Дані зберігаються лише в цьому браузері.");
+    byId("account-summary").textContent = "Запис тренувань вимкнено, доки адміністратор не налаштує Supabase.";
+    if (!state.cloud.sdkError) setCloudStatus("Доступний лише каталог програм і база знань.");
   } else {
-    byId("account-summary").textContent = "Локальний гостьовий профіль. Увійди, щоб увімкнути хмарну копію.";
+    byId("account-summary").textContent = "Увійдіть або зареєструйтеся, щоб зберігати власний прогрес у хмарі.";
   }
+  renderAccessState();
 }
 
-async function updateTransferAvailability() {
-  const button = byId("transfer-guest-history");
+function renderAccessState() {
+  const signedIn = hasAccount();
+  const historyLocked = byId("history-locked");
+  const historyContent = byId("personal-history-content");
+  if (historyLocked) historyLocked.hidden = signedIn;
+  if (historyContent) historyContent.hidden = !signedIn;
+  if (byId("add-past-workout")) byId("add-past-workout").disabled = !signedIn;
+  if (byId("export-backup")) byId("export-backup").disabled = !signedIn;
+  if (byId("import-backup")) byId("import-backup").disabled = !signedIn;
+  const hint = byId("session-access-hint");
+  if (hint) {
+    hint.textContent = signedIn
+      ? (navigator.onLine === false
+        ? "Офлайн: чернетка збережеться в кеші цього акаунта й очікуватиме синхронізації."
+        : "Зміни кешуються для цього акаунта та синхронізуються з Supabase.")
+      : "Увійдіть, щоб записувати підходи та зберігати прогрес у хмарі.";
+  }
+  updateSessionHeader();
+}
+
+async function updateLegacyImportAvailability() {
+  const button = byId("import-legacy-data");
   if (!button) return;
-  button.hidden = !state.cloud.user || !(await scopeHasWorkoutData("guest"));
+  if (!hasAccount()) {
+    button.hidden = true;
+    return;
+  }
+  const [hasLegacy, marker] = await Promise.all([
+    hasLegacyAnonymousData(),
+    getSetting(LEGACY_IMPORT_MARKER_KEY),
+  ]);
+  button.hidden = !hasLegacy || Boolean(marker);
 }
 
 async function runCloudSync(reason = "зміни") {
-  if (!state.cloud.sync || !state.cloud.user) return { status: "guest" };
+  if (!state.cloud.sync || !state.cloud.user) return { status: "read-only" };
   const sync = state.cloud.sync;
   const userId = state.cloud.user.id;
   const task = state.cloud.syncPromise.catch(() => {}).then(async () => {
     if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return { status: "stale" };
-    setCloudStatus(`Синхронізація: ${reason}…`);
+    setCloudStatus(`Очікує синхронізації · ${reason}…`);
     try {
       if (state.dirtyEntries.size) await flushSaves();
       const result = await sync.sync();
@@ -208,13 +298,16 @@ async function runCloudSync(reason = "зміни") {
       if (result.status === "conflict") {
         state.cloud.conflict = result;
         renderAccount();
-        setCloudStatus("Конфлікт: обери локальну або хмарну версію.", true);
+        setCloudStatus("Конфлікт: оберіть зміни цього пристрою або хмарну версію.", true);
+        setStatus("Конфлікт синхронізації", true);
       } else if (result.status === "offline") {
-        setCloudStatus("Офлайн: зміни збережені локально й синхронізуються пізніше.");
+        setCloudStatus("Офлайн · очікує синхронізації.");
+        setStatus("Збережено локально · очікує синхронізації");
       } else {
         state.cloud.conflict = null;
-        setCloudStatus(`Хмарна копія актуальна (${result.status}).`);
-        if (result.status === "pulled") await loadCurrentScope();
+        setCloudStatus("Збережено у хмарі.");
+        setStatus("Збережено у хмарі");
+        if (["pulled", "initialized-empty"].includes(result.status)) await loadCurrentScope();
         renderAccount();
       }
       return result;
@@ -228,9 +321,29 @@ async function runCloudSync(reason = "зміни") {
   return task;
 }
 
+async function markPendingAndSync(reason, { awaitCloud = false } = {}) {
+  if (!hasAccount()) throw new Error("Увійдіть в акаунт, щоб зберігати тренування");
+  await state.cloud.sync.markPending();
+  setStatus(navigator.onLine === false ? "Збережено локально · очікує синхронізації" : "Збережено локально · очікує хмару");
+  setCloudStatus(navigator.onLine === false ? "Офлайн · очікує синхронізації." : `Очікує синхронізації · ${reason}…`);
+  if (navigator.onLine === false) return { status: "offline-pending" };
+  if (!awaitCloud) {
+    scheduleCloudSync(reason);
+    return { status: "pending" };
+  }
+  const result = await runCloudSync(reason);
+  if (result.status === "offline") {
+    throw new Error("Хмарний сервіс недоступний. Зміни збережено в кеші акаунта й вони очікують синхронізації.");
+  }
+  if (["error", "conflict"].includes(result.status)) {
+    throw result.error ?? new Error("Не вдалося зберегти зміни у хмарі. Локальна копія очікує синхронізації.");
+  }
+  return result;
+}
+
 let syncTimer = null;
 function scheduleCloudSync(reason = "редагування") {
-  if (!state.cloud.sync) return;
+  if (!hasAccount()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => void runCloudSync(reason), 700);
 }
@@ -263,7 +376,8 @@ async function applyAuthSession(session, event = "SESSION") {
   state.cloud.session = session ?? null;
   if (user) {
     saveAccountHint(user);
-    if (state.cloud.user?.id !== user.id) await switchStorageProfile(user);
+    state.cloud.offlineIdentity = false;
+    if (state.cloud.user?.id !== user.id || !state.cloud.accessReady) await switchStorageProfile(user, { initialize: true });
     else {
       state.cloud.user = user;
       renderAccount();
@@ -271,8 +385,7 @@ async function applyAuthSession(session, event = "SESSION") {
     if (event === "PASSWORD_RECOVERY") byId("password-recovery-form").hidden = false;
   } else if (event === "SIGNED_OUT" || state.cloud.user) {
     clearAccountHint();
-    await switchStorageProfile(null, { sync: false });
-    setCloudStatus("Вихід виконано. Відкрито гостьовий локальний профіль.");
+    await enterReadOnlyMode({ message: "Вихід виконано. Особисті дані приховано; доступний каталог." });
   }
 }
 
@@ -282,23 +395,22 @@ async function initializeCloud() {
   state.cloud.config = config;
   state.cloud.configured = isCloudConfigured(config);
   if (!state.cloud.configured) {
-    setStorageScope("guest");
-    renderAccount();
+    await enterReadOnlyMode({ message: "Supabase не налаштовано. Запис тренувань вимкнено." });
     return;
   }
   try {
     const createClient = test?.createClient ?? (await import(config.supabaseClientUrl || cloudConfig.supabaseClientUrl)).createClient;
     state.cloud.auth = createSupabaseAuth({ config, createClient });
+    state.cloud.sdkError = null;
+    state.cloud.offlineIdentity = false;
     const session = await state.cloud.auth.getSession();
     if (session?.user) {
       state.cloud.session = session;
-      state.cloud.user = session.user;
       saveAccountHint(session.user);
-      setStorageScope(session.user.id);
-      state.cloud.sync = makeSyncFor(session.user.id);
+      await switchStorageProfile(session.user, { initialize: true });
     } else {
       clearAccountHint();
-      setStorageScope("guest");
+      await enterReadOnlyMode();
     }
     state.cloud.auth.onAuthStateChange((event, nextSession) => {
       setTimeout(() => void applyAuthSession(nextSession, event), 0);
@@ -310,19 +422,21 @@ async function initializeCloud() {
       try {
         setStorageScope(hint.id);
         state.cloud.user = hint;
-        setCloudStatus("Хмарний сервіс недоступний. Відкрито кеш цього акаунта офлайн.", true);
+        state.cloud.offlineIdentity = true;
+        state.cloud.sync = makeSyncFor(hint.id) ?? makeOfflineSyncFor(hint.id);
+        state.cloud.accessReady = true;
+        await loadCurrentScope();
+        setCloudStatus("Хмарний сервіс недоступний. Відкрито ізольований кеш останнього акаунта; зміни очікуватимуть синхронізації.", true);
       } catch {
         clearAccountHint();
-        state.cloud.user = null;
-        setStorageScope("guest");
-        setCloudStatus(`Хмара недоступна: ${error.message}. Гостьові дані працюють локально.`, true);
+        await enterReadOnlyMode({ message: `Хмара недоступна: ${error.message}. Доступний лише каталог.` });
       }
     } else {
-      setStorageScope("guest");
-      setCloudStatus(`Хмара недоступна: ${error.message}. Гостьові дані працюють локально.`, true);
+      await enterReadOnlyMode({ message: `Хмара недоступна: ${error.message}. Доступний лише каталог.` });
     }
   }
   renderAccount();
+  updateConnectionStatus();
 }
 
 function currentProgram() {
@@ -473,8 +587,7 @@ function persistEntry(entry) {
     current.revision = saved.revision;
     current.updatedAt = saved.updatedAt;
     state.saveBlocked = false;
-    setStatus("Збережено");
-    scheduleCloudSync("редагування підходів");
+    await markPendingAndSync("редагування підходів");
     return saved;
   }).catch((error) => {
     state.saveBlocked = error instanceof RevisionConflictError;
@@ -744,7 +857,10 @@ function renderExerciseCard(card, index) {
       if (entry) host.append(renderMovement(entry, movement));
     }
   } else {
-    host.append(element("p", { className: "inactive-log-hint", text: "Почни тренування, щоб записувати підходи." }));
+    host.append(element("p", {
+      className: "inactive-log-hint",
+      text: hasAccount() ? "Почни тренування, щоб записувати підходи." : "Увійдіть, щоб записувати вагу й повторення. Техніка та альтернативи доступні нижче.",
+    }));
   }
   body.append(host);
   renderTechnique(card, body);
@@ -830,7 +946,13 @@ function updateSessionHeader() {
   const start = byId("start-workout");
   const finish = byId("finish-workout");
   const date = byId("workout-date");
-  if (state.active) {
+  if (!hasAccount()) {
+    summary.textContent = "Увійдіть, щоб створити тренування";
+    start.textContent = "Потрібен вхід";
+    start.disabled = true;
+    finish.disabled = true;
+    date.disabled = true;
+  } else if (state.active) {
     summary.textContent = `${state.active.session.programNameSnapshot} · ${state.active.session.dayNameSnapshot} · ${formatWorkoutDate(state.active.session.workoutDate)}`;
     start.textContent = "Тренування триває";
     start.disabled = true;
@@ -857,6 +979,11 @@ function renderJournal() {
 }
 
 async function beginWorkout({ past = false } = {}) {
+  if (!hasAccount()) {
+    showSection("account", { focus: true });
+    setCloudStatus("Увійдіть, щоб почати тренування.", true);
+    return;
+  }
   if (state.active) {
     setStatus("Спочатку заверши поточне тренування", true);
     return;
@@ -864,6 +991,7 @@ async function beginWorkout({ past = false } = {}) {
   const date = byId("workout-date").value;
   try {
     state.active = await startSession(state.selectedProgramId, state.selectedDayId, { workoutDate: date, performedAt: performedAtForDate(date) });
+    await markPendingAndSync("початок тренування");
     await refreshData();
     renderJournal();
     renderHistory();
@@ -882,16 +1010,27 @@ async function completeWorkout() {
     await finishSession(state.active.session, state.active.entries);
     state.active = null;
     await refreshData();
-    await runCloudSync("завершення тренування");
     renderJournal();
     renderHistory();
-    setStatus("Тренування збережено в історії");
+    await markPendingAndSync("завершення тренування", { awaitCloud: true });
+    setStatus(navigator.onLine === false ? "Завершено локально · очікує синхронізації" : "Тренування збережено у хмарі");
   } catch (error) {
     reportError(error);
   }
 }
 
 function renderHistory() {
+  if (!hasAccount()) {
+    byId("history-filters")?.replaceChildren();
+    byId("history-list")?.replaceChildren();
+    const detail = byId("history-detail");
+    if (detail) {
+      detail.hidden = true;
+      detail.replaceChildren();
+    }
+    renderAccessState();
+    return;
+  }
   renderHistoryFilters(byId("history-filters"), state.historyFilters, PROGRAM_LIST, (filters) => {
     state.historyFilters = filters;
     renderHistory();
@@ -904,6 +1043,7 @@ function renderHistory() {
 
 const historyHandlers = {
   onEdit: async (session) => {
+    if (!hasAccount()) return;
     if (state.active) return alert("Спочатку заверши поточне тренування.");
     try {
       const updated = await putSession({ ...session, status: "draft", completedAt: null }, session.revision);
@@ -916,11 +1056,12 @@ const historyHandlers = {
       await refreshData();
       renderJournal();
       renderHistory();
-      await runCloudSync("редагування тренування");
+      await markPendingAndSync("редагування тренування", { awaitCloud: true });
       setStatus("Історичне тренування відкрито для редагування");
     } catch (error) { reportError(error); }
   },
   onDelete: async (session) => {
+    if (!hasAccount()) return;
     if (state.active?.session.id === session.id || session.status !== "completed") {
       alert("Активне тренування не можна видалити зі списку історії.");
       return;
@@ -932,14 +1073,15 @@ const historyHandlers = {
       await refreshData();
       renderJournal();
       renderHistory();
-      await runCloudSync("видалення тренування");
-      setStatus("Тренування видалено");
+      await markPendingAndSync("видалення тренування", { awaitCloud: true });
+      setStatus(navigator.onLine === false ? "Видалено локально · очікує синхронізації" : "Тренування видалено з хмари");
     } catch (error) { reportError(error); }
   },
 };
 
 async function exportBackup() {
   try {
+    if (!hasAccount()) throw new Error("Увійдіть, щоб експортувати особисті дані");
     if (state.active) await flushSaves();
     const payload = await createBackup();
     downloadBackup(payload);
@@ -950,6 +1092,7 @@ async function exportBackup() {
 async function importBackup(file) {
   if (!file) return;
   try {
+    if (!hasAccount()) throw new Error("Увійдіть, щоб імпортувати особисті дані");
     const payload = JSON.parse(await file.text());
     const validation = validateBackup(payload);
     if (!validation.valid) throw new Error(validation.errors.join(". "));
@@ -968,8 +1111,8 @@ async function importBackup(file) {
     selectProgram(programId, state.active?.session.dayId);
     renderJournal();
     renderHistory();
-    await runCloudSync("імпорт резервної копії");
-    setBackupStatus(`Імпортовано нових записів: ${merge.additions}; дублів: ${merge.duplicates.length}`);
+    await markPendingAndSync("імпорт резервної копії", { awaitCloud: true });
+    setBackupStatus(`${navigator.onLine === false ? "Імпортовано локально; очікує синхронізації" : "Імпортовано у хмару"}. Нових записів: ${merge.additions}; дублів: ${merge.duplicates.length}`);
   } catch (error) { reportError(error, "backup"); }
   finally { byId("import-backup").value = ""; }
 }
@@ -990,7 +1133,10 @@ function renderProgramGuide() {
       }
       try {
         selectProgram(program.id);
-        await putSetting("currentProgramId", program.id);
+        if (hasAccount()) {
+          await putSetting("currentProgramId", program.id);
+          await markPendingAndSync("вибір програми");
+        }
         renderJournal();
         showSection("journal", { focus: true, focusTarget: "program-summary" });
         setStatus(`Обрано програму: ${program.name}`);
@@ -1017,7 +1163,7 @@ async function signIn(event) {
     });
     byId("account-password").value = "";
     await applyAuthSession(result.session ?? (result.user ? { user: result.user } : null), "SIGNED_IN");
-    setCloudStatus("Вхід виконано. Локальний профіль акаунта ізольовано від гостьового.");
+    setCloudStatus("Вхід виконано. Завантажено хмарну історію цього акаунта.");
   } catch (error) { setCloudStatus(error.message, true); }
 }
 
@@ -1056,31 +1202,45 @@ async function updateRecoveredPassword(event) {
 }
 
 async function logoutAccount() {
+  if (!hasAccount()) return;
   try {
+    if (state.active || state.dirtyEntries.size || state.saveQueues.size) await flushSaves();
+    if (await state.cloud.sync.hasPending()) {
+      if (navigator.onLine !== false) await runCloudSync("вихід");
+      if (await state.cloud.sync.hasPending()) {
+        const approved = confirm("Є зміни, які ще не потрапили в хмару. Вийти все одно? Вони залишаться в ізольованому кеші цього акаунта й синхронізуються після наступного входу.");
+        if (!approved) {
+          setCloudStatus("Вихід скасовано: спочатку синхронізуйте зміни.", true);
+          return;
+        }
+      }
+    }
     if (state.cloud.auth) await state.cloud.auth.signOut();
   } catch (error) {
-    console.warn("Cloud sign-out failed; local profile is still closed", error);
-  } finally {
-    clearAccountHint();
-    await switchStorageProfile(null, { sync: false });
-    setCloudStatus("Вихід виконано. Дані акаунта приховано; відкрито гостьовий профіль.");
+    setCloudStatus(`Не вдалося завершити вихід: ${error.message}`, true);
+    return;
   }
+  clearAccountHint();
+  await enterReadOnlyMode({ message: "Вихід виконано. Особисті дані приховано; доступний каталог." });
 }
 
-async function transferGuestHistory() {
-  if (!state.cloud.user) return;
-  if (!confirm("Перенести гостьову локальну історію в цей акаунт? Дані не переносяться автоматично.")) return;
+async function importLegacyData() {
+  if (!hasAccount()) return;
+  if (!confirm("Імпортувати збережені раніше локальні дані в цей акаунт? Це одноразова явна міграція; автоматично дані не приєднуються.")) return;
   try {
-    const plan = await prepareScopeTransfer(state.cloud.user.id);
-    if (plan.conflicts.length) {
-      setCloudStatus(`Перенесення зупинено: ${plan.conflicts.length} конфліктів стабільних ID. Експортуй резервні копії та виріши їх окремо.`, true);
+    const legacy = await exportLegacyAnonymousData();
+    const result = await state.cloud.sync.importLegacy(legacy, { confirmed: true });
+    if (result.status === "offline") {
+      setCloudStatus("Імпорт потребує мережі: старі дані залишено без змін.", true);
       return;
     }
-    await applyScopeTransfer(state.cloud.user.id, plan, { confirmed: true });
+    if (result.status === "conflict") {
+      setCloudStatus(`Імпорт зупинено: ${result.conflicts.length} конфліктів. Старі дані не змінено.`, true);
+      return;
+    }
     await loadCurrentScope();
-    await runCloudSync("перенесення гостьової історії");
-    byId("transfer-guest-history").hidden = true;
-    setCloudStatus("Гостьову історію перенесено в акаунт і поставлено на синхронізацію.");
+    await updateLegacyImportAvailability();
+    setCloudStatus(result.status === "already-imported" ? "Старі локальні дані вже були імпортовані." : "Старі локальні дані імпортовано та збережено у хмарі.");
   } catch (error) { setCloudStatus(error.message, true); }
 }
 
@@ -1090,13 +1250,19 @@ function wireControls() {
     const next = PROGRAM_LIST.find((program) => program.categoryId === event.target.value);
     if (!next) return;
     selectProgram(next.id);
-    await putSetting("currentProgramId", next.id);
+    if (hasAccount()) {
+      await putSetting("currentProgramId", next.id);
+      await markPendingAndSync("вибір програми");
+    }
     renderJournal();
   });
   byId("program-picker").addEventListener("change", async (event) => {
     if (state.active) return;
     selectProgram(event.target.value);
-    await putSetting("currentProgramId", state.selectedProgramId);
+    if (hasAccount()) {
+      await putSetting("currentProgramId", state.selectedProgramId);
+      await markPendingAndSync("вибір програми");
+    }
     renderJournal();
   });
   byId("start-workout").addEventListener("click", () => beginWorkout());
@@ -1113,9 +1279,12 @@ function wireControls() {
   byId("account-reset").addEventListener("click", requestPasswordReset);
   byId("account-logout").addEventListener("click", logoutAccount);
   byId("password-recovery-form").addEventListener("submit", updateRecoveredPassword);
-  byId("transfer-guest-history").addEventListener("click", transferGuestHistory);
+  byId("import-legacy-data").addEventListener("click", importLegacyData);
   byId("sync-use-local").addEventListener("click", () => resolveSyncConflict("local"));
   byId("sync-use-cloud").addEventListener("click", () => resolveSyncConflict("cloud"));
+  document.querySelectorAll(".open-account").forEach((button) => button.addEventListener("click", () => {
+    showSection("account", { focus: true });
+  }));
   byId("menu-toggle").addEventListener("click", () => {
     if (byId("app-drawer").hidden) openMenu();
     else closeMenu();
@@ -1144,7 +1313,12 @@ function wireControls() {
 }
 
 function updateConnectionStatus() {
-  byId("app-connection-status").textContent = navigator.onLine ? "Локальний журнал" : "Офлайн";
+  const label = !state.cloud.configured
+    ? "Лише каталог"
+    : !hasAccount()
+      ? "Потрібен вхід"
+      : state.cloud.sdkError ? "Кеш акаунта" : navigator.onLine === false ? "Офлайн · кеш" : "Хмара онлайн";
+  byId("app-connection-status").textContent = label;
 }
 
 async function registerServiceWorker() {
@@ -1195,17 +1369,20 @@ async function boot() {
     renderAccount();
     addEventListener("online", () => {
       updateConnectionStatus();
-      void runCloudSync("відновлення мережі");
+      if (state.cloud.offlineIdentity) void initializeCloud();
+      else void runCloudSync("відновлення мережі");
     });
-    addEventListener("offline", updateConnectionStatus);
+    addEventListener("offline", () => {
+      updateConnectionStatus();
+      renderAccessState();
+    });
     await initializeCloud();
-    await loadCurrentScope({ render: false });
-    if (state.cloud.sync) await runCloudSync("запуск");
     if (state.active) setStatus("Незавершене тренування відновлено");
     renderJournal();
     renderHistory();
     renderAccount();
-    await updateTransferAvailability();
+    await updateLegacyImportAvailability();
+    updateConnectionStatus();
     globalThis.__WORKOUT_BOOT__?.ready();
   } catch (error) {
     reportError(error);

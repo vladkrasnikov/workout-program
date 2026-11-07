@@ -506,418 +506,196 @@ try {
     mobile: true,
   });
 
-  const migration = await evaluate(cdp, `(async () => {
+  const readOnlyState = await evaluate(cdp, `(async () => {
     const waitFor = async (check, message) => {
-      for (let attempt = 0; attempt < 80; attempt += 1) {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
         if (check()) return;
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 50));
       }
       throw new Error(message);
     };
-    await waitFor(() => document.querySelector('#history-filters select')
-      && document.querySelector('#start-workout')
-      && !document.querySelector('#start-workout').disabled, 'App did not boot');
+    await waitFor(() => document.querySelector('#category-picker')?.options.length === 5
+      && document.querySelector('#start-workout')?.disabled
+      && !document.querySelector('#history-locked')?.hidden,
+    'Read-only catalog did not finish booting');
 
+    const category = document.querySelector('#category-picker');
+    category.value = 'performance';
+    category.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitFor(() => document.querySelector('#program-picker')?.value === 'athlete-full-body-3x',
+      'Read-only program selection stopped working');
+
+    const openDatabase = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open('workout-program');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const readSnapshot = async () => {
+      const database = await openDatabase();
+      const transaction = database.transaction(['sessions', 'entries'], 'readonly');
+      const read = (store, id) => new Promise((resolve, reject) => {
+        const request = transaction.objectStore(store).get(id);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const count = (store) => new Promise((resolve, reject) => {
+        const request = transaction.objectStore(store).count();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const result = await Promise.all([
+        read('sessions', 'legacy-session'),
+        read('entries', 'legacy-entry'),
+        count('sessions'),
+        count('entries'),
+      ]);
+      const version = database.version;
+      database.close();
+      return { version, session: result[0], entry: result[1], sessions: result[2], entries: result[3] };
+    };
+    const before = await readSnapshot();
+
+    const start = document.querySelector('#start-workout');
+    start.click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    document.querySelector('.drawer-link[data-nav-id="history"]').click();
+    await waitFor(() => !document.querySelector('#tab-history').hidden, 'History section did not open');
+    const historyState = {
+      lockedVisible: !document.querySelector('#history-locked').hidden,
+      personalHidden: document.querySelector('#personal-history-content').hidden,
+      renderedItems: document.querySelectorAll('#history-list .history-item').length,
+      addPastDisabled: document.querySelector('#add-past-workout').disabled,
+    };
+    document.querySelector('#history-locked .open-account').click();
+    await waitFor(() => !document.querySelector('#tab-account').hidden, 'Account CTA did not open');
+    const accountState = {
+      currentNavigation: document.querySelector('#app-drawer [aria-current="page"]')?.dataset.navId,
+      setupVisible: !document.querySelector('#cloud-setup-message').hidden,
+      setupText: document.querySelector('#cloud-setup-message').textContent,
+      summary: document.querySelector('#account-summary').textContent,
+      cloudStatus: document.querySelector('#cloud-status').textContent,
+      formDisabled: [...document.querySelector('#account-form').elements].every((control) => control.disabled),
+      importLegacyHidden: document.querySelector('#import-legacy-data').hidden,
+      backupHidden: document.querySelector('#backup-tools').hidden,
+    };
+    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
+    const after = await readSnapshot();
+
+    return {
+      before,
+      after,
+      startDisabled: start.disabled,
+      startText: start.textContent,
+      dateDisabled: document.querySelector('#workout-date').disabled,
+      finishDisabled: document.querySelector('#finish-workout').disabled,
+      sessionHint: document.querySelector('#session-access-hint').textContent,
+      forms: document.querySelectorAll('.exercise-log').length,
+      inactiveHints: document.querySelectorAll('.inactive-log-hint').length,
+      historyState,
+      accountState,
+      programId: document.querySelector('#program-picker').value,
+      categories: document.querySelector('#category-picker').options.length,
+      guideItems: document.querySelectorAll('#program-guide-list .program-guide-item').length,
+      sessionPosition: getComputedStyle(document.querySelector('.session-card')).position,
+      viewportMeta: document.querySelector('meta[name="viewport"]').content,
+      mobileControls: ['#category-picker', '#program-picker'].map((selector) => ({
+        selector,
+        fontSize: Number.parseFloat(getComputedStyle(document.querySelector(selector)).fontSize),
+      })),
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      userDatabases: (await indexedDB.databases()).map(({ name }) => name).filter((name) => name?.startsWith('workout-program-user-')),
+    };
+  })()`);
+
+  assert.equal(readOnlyState.before.version, 1);
+  assert.equal(readOnlyState.before.session.id, 'legacy-session');
+  assert.equal(readOnlyState.before.session.programId, undefined);
+  assert.equal(readOnlyState.before.entry.slotId, 'a1');
+  assert.equal(readOnlyState.before.entry.sets[0].loadKg, 35);
+  assert.equal(readOnlyState.before.sessions, 1);
+  assert.equal(readOnlyState.before.entries, 1);
+  assert.deepEqual(readOnlyState.after, readOnlyState.before);
+  assert.equal(readOnlyState.startDisabled, true);
+  assert.match(readOnlyState.startText, /вхід/i);
+  assert.equal(readOnlyState.dateDisabled, true);
+  assert.equal(readOnlyState.finishDisabled, true);
+  assert.match(readOnlyState.sessionHint, /увійдіть/i);
+  assert.equal(readOnlyState.forms, 0);
+  assert.ok(readOnlyState.inactiveHints > 0);
+  assert.deepEqual(readOnlyState.historyState, {
+    lockedVisible: true,
+    personalHidden: true,
+    renderedItems: 0,
+    addPastDisabled: true,
+  });
+  assert.equal(readOnlyState.accountState.currentNavigation, 'account');
+  assert.equal(readOnlyState.accountState.setupVisible, true);
+  assert.match(readOnlyState.accountState.setupText, /Supabase/i);
+  assert.match(readOnlyState.accountState.summary, /запис тренувань вимкнено/i);
+  assert.match(readOnlyState.accountState.cloudStatus, /каталог/i);
+  assert.equal(readOnlyState.accountState.formDisabled, true);
+  assert.equal(readOnlyState.accountState.importLegacyHidden, true);
+  assert.equal(readOnlyState.accountState.backupHidden, true);
+  assert.equal(readOnlyState.programId, 'athlete-full-body-3x');
+  assert.equal(readOnlyState.categories, 5);
+  assert.equal(readOnlyState.guideItems, 5);
+  assert.notEqual(readOnlyState.sessionPosition, 'sticky');
+  assert.notEqual(readOnlyState.sessionPosition, 'fixed');
+  assert.doesNotMatch(readOnlyState.viewportMeta, /maximum-scale|user-scalable/i);
+  assert.equal(readOnlyState.mobileControls.every(({ fontSize }) => fontSize >= 16), true);
+  assert.equal(readOnlyState.horizontalOverflow, false);
+  assert.deepEqual(readOnlyState.userDatabases, []);
+
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await delay(300);
+  const reloadState = await evaluate(cdp, `(async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (document.querySelector('#category-picker')?.options.length === 5
+        && document.querySelectorAll('#program-guide-list .program-guide-item').length === 5
+        && document.querySelector('#start-workout')?.disabled) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     const database = await new Promise((resolve, reject) => {
       const request = indexedDB.open('workout-program');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const tx = database.transaction(['sessions', 'entries'], 'readonly');
-    const legacySession = await new Promise((resolve, reject) => {
-      const request = tx.objectStore('sessions').get('legacy-session');
+    const transaction = database.transaction(['sessions', 'entries'], 'readonly');
+    const count = (store) => new Promise((resolve, reject) => {
+      const request = transaction.objectStore(store).count();
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    const legacyEntry = await new Promise((resolve, reject) => {
-      const request = tx.objectStore('entries').get('legacy-entry');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const databaseVersion = database.version;
+    const [sessions, entries] = await Promise.all([count('sessions'), count('entries')]);
     database.close();
-
-    const mobileControls = ['#workout-date', '#category-picker', '#program-picker'].map((selector) => {
-      const control = document.querySelector(selector);
-      control.focus();
-      return {
-        selector,
-        fontSize: Number.parseFloat(getComputedStyle(control).fontSize),
-        focused: document.activeElement === control,
-      };
-    });
-
-    const category = document.querySelector('#category-picker');
-    category.value = 'performance';
-    category.dispatchEvent(new Event('change', { bubbles: true }));
-    await waitFor(() => document.querySelector('#program-picker').value === 'athlete-full-body-3x', 'Athlete program was not selected');
-    document.querySelector('#start-workout').click();
-    await waitFor(() => document.querySelectorAll('.exercise-log').length === 8
-      && document.querySelector('[data-slot-id="athlete-full-body-3x:a:a1"]'), 'Athlete Day A forms were not rendered');
     return {
-      databaseVersion,
-      migratedProgram: legacySession?.programId,
-      migratedSlot: legacyEntry?.slotId,
-      migratedLoad: legacyEntry?.sets?.[0]?.loadKg,
-      programId: document.querySelector('#program-picker').value,
-      forms: document.querySelectorAll('.exercise-log').length,
-      viewport: [innerWidth, innerHeight],
-      mobileControls,
-      sessionPosition: getComputedStyle(document.querySelector('.session-card')).position,
-      viewportMeta: document.querySelector('meta[name="viewport"]').content,
+      categories: document.querySelector('#category-picker').options.length,
+      guideItems: document.querySelectorAll('#program-guide-list .program-guide-item').length,
+      startDisabled: document.querySelector('#start-workout').disabled,
+      historyLocked: !document.querySelector('#history-locked').hidden,
+      personalHistoryHidden: document.querySelector('#personal-history-content').hidden,
+      sessions,
+      entries,
     };
   })()`);
+  assert.deepEqual(reloadState, {
+    categories: 5,
+    guideItems: 5,
+    startDisabled: true,
+    historyLocked: true,
+    personalHistoryHidden: true,
+    sessions: 1,
+    entries: 1,
+  });
 
-  assert.equal(migration.databaseVersion, 2);
-  assert.equal(migration.migratedProgram, 'spine-safe');
-  assert.equal(migration.migratedSlot, 'spine-safe:a:a1');
-  assert.equal(migration.migratedLoad, 35);
-  assert.equal(migration.programId, 'athlete-full-body-3x');
-  assert.equal(migration.forms, 8);
-  assert.deepEqual(migration.viewport, [390, 844]);
-  assert.equal(migration.mobileControls.every((control) => control.fontSize >= 16 && control.focused), true);
-  assert.notEqual(migration.sessionPosition, 'sticky');
-  assert.notEqual(migration.sessionPosition, 'fixed');
-  assert.doesNotMatch(migration.viewportMeta, /maximum-scale|user-scalable/i);
-
-  await cdp.send("Page.reload", { ignoreCache: true });
-  await delay(300);
-
-  const result = await evaluate(cdp, `(async () => {
-    const waitFor = async (check, message) => {
-      for (let attempt = 0; attempt < 80; attempt += 1) {
-        if (check()) return;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      throw new Error(message);
-    };
-    await waitFor(() => document.querySelector('#start-workout')?.disabled
-      && document.querySelectorAll('.exercise-log').length === 8, 'Active athlete workout was not resumed');
-    const slotSelector = '[data-slot-id="athlete-full-body-3x:a:a1"]';
-    const row = document.querySelector(slotSelector + ' .set-row');
-    const numbers = row.querySelectorAll('input[type="number"]');
-    numbers[0].value = '50';
-    numbers[0].dispatchEvent(new Event('input', { bubbles: true }));
-    numbers[1].value = '6';
-    numbers[1].dispatchEvent(new Event('input', { bubbles: true }));
-    const completed = row.querySelector('input[type="checkbox"]');
-    completed.checked = true;
-    completed.dispatchEvent(new Event('change', { bubbles: true }));
-    await waitFor(() => document.querySelector('#save-status').textContent === 'Збережено', 'Set was not saved');
-    document.querySelector('#finish-workout').click();
-    await waitFor(() => !document.querySelector('#start-workout').disabled, 'Workout was not completed');
-    document.querySelector('.drawer-link[data-nav-id="history"]').click();
-    await waitFor(() => document.querySelectorAll('.history-item').length >= 2, 'Migrated and completed workouts missing from history');
-    const historyText = document.querySelector('#history-list').textContent;
-    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
-
-    const dateControl = document.querySelector('#workout-date');
-    dateControl.focus();
-    const dateFocus = document.activeElement === dateControl;
-    const dateFontSize = Number.parseFloat(getComputedStyle(dateControl).fontSize);
-
-    const startNextWorkout = async (message) => {
-      document.querySelector('#start-workout').click();
-      await waitFor(() => document.querySelectorAll('.exercise-log').length === 8, message);
-    };
-    const saveWorkingSet = async (load, reps) => {
-      const activeRow = document.querySelector(slotSelector + ' .set-row');
-      const activeNumbers = activeRow.querySelectorAll('input[type="number"]');
-      activeNumbers[0].value = String(load);
-      activeNumbers[0].dispatchEvent(new Event('input', { bubbles: true }));
-      activeNumbers[1].value = String(reps);
-      activeNumbers[1].dispatchEvent(new Event('input', { bubbles: true }));
-      const activeCompleted = activeRow.querySelector('input[type="checkbox"]');
-      activeCompleted.checked = true;
-      activeCompleted.dispatchEvent(new Event('change', { bubbles: true }));
-      await waitFor(() => document.querySelector('#save-status').textContent === 'Збережено', 'Set was not saved');
-    };
-    const finishActiveWorkout = async () => {
-      document.querySelector('#finish-workout').click();
-      await waitFor(() => !document.querySelector('#start-workout').disabled, 'Workout was not completed');
-    };
-
-    await startNextWorkout('Second athlete workout did not start');
-    const previous = document.querySelector(slotSelector + ' .last-result').textContent;
-    const stableAtFifty = document.querySelector(slotSelector + ' .stable-result').textContent;
-    const secondNumbers = document.querySelector(slotSelector + ' .set-row').querySelectorAll('input[type="number"]');
-    const autoFilledFifty = secondNumbers[0].value;
-    const repsRemainEmpty = secondNumbers[1].value;
-    const mobileActiveControls = [
-      document.querySelector(slotSelector + ' input[type="number"]'),
-      document.querySelector(slotSelector + ' input[type="text"]'),
-      document.querySelector(slotSelector + ' select'),
-    ].map((control) => {
-      control.focus();
-      return {
-        fontSize: Number.parseFloat(getComputedStyle(control).fontSize),
-        focused: document.activeElement === control,
-      };
-    });
-    const stableCopy = [...document.querySelectorAll(slotSelector + ' .workout-actions button')]
-      .find((button) => button.textContent.startsWith('Повторити з орієнтиром'));
-    stableCopy.click();
-    await waitFor(() => document.querySelector(slotSelector + ' .set-row input[aria-label="Повтори"]')?.value === '6', 'Stable-load copy did not preserve actual reps');
-    const copiedNumbers = document.querySelector(slotSelector + ' .set-row').querySelectorAll('input[type="number"]');
-    const copiedStableLoad = copiedNumbers[0].value;
-    const copiedActualReps = copiedNumbers[1].value;
-    await saveWorkingSet(40, 8);
-    await finishActiveWorkout();
-
-    await startNextWorkout('Third athlete workout did not start');
-    const stableAfterLower = document.querySelector(slotSelector + ' .stable-result').textContent;
-    await saveWorkingSet(60, 5);
-    await finishActiveWorkout();
-
-    await startNextWorkout('Fourth athlete workout did not start');
-    const stableAtSixty = document.querySelector(slotSelector + ' .stable-result').textContent;
-    document.querySelector('.drawer-link[data-nav-id="history"]').click();
-    const beforeDeleteCount = document.querySelectorAll('#history-list .history-item').length;
-
-    const readDatabase = () => new Promise((resolve, reject) => {
-      const request = indexedDB.open('workout-program');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const getAll = (store) => new Promise((resolve, reject) => {
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const beforeDeleteDb = await readDatabase();
-    const beforeDeleteTx = beforeDeleteDb.transaction(['sessions', 'entries'], 'readonly');
-    const [sessionsBeforeDelete, entriesBeforeDelete] = await Promise.all([
-      getAll(beforeDeleteTx.objectStore('sessions')),
-      getAll(beforeDeleteTx.objectStore('entries')),
-    ]);
-    beforeDeleteDb.close();
-    const highEntry = entriesBeforeDelete.find((entry) => entry.sets?.some((set) => set.confirmed && set.loadKg === 60));
-    const highSessionId = highEntry?.sessionId;
-    const newestCompletedId = sessionsBeforeDelete
-      .filter((session) => session.status === 'completed')
-      .sort((a, b) => b.performedAt.localeCompare(a.performedAt))[0]?.id;
-
-    window.confirm = () => true;
-    document.querySelector('#history-list .history-item .action-danger').click();
-    await waitFor(() => document.querySelectorAll('#history-list .history-item').length === beforeDeleteCount - 1, 'History card was not deleted');
-
-    const afterDeleteDb = await readDatabase();
-    const afterDeleteTx = afterDeleteDb.transaction(['sessions', 'entries'], 'readonly');
-    const [sessionsAfterDelete, entriesAfterDelete] = await Promise.all([
-      getAll(afterDeleteTx.objectStore('sessions')),
-      getAll(afterDeleteTx.objectStore('entries')),
-    ]);
-    afterDeleteDb.close();
-    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
-    const stableAfterDelete = document.querySelector(slotSelector + ' .stable-result').textContent;
-    return {
-      forms: document.querySelectorAll('.exercise-log').length,
-      historyItems: beforeDeleteCount,
-      historyText,
-      previous,
-      stableAtFifty,
-      autoFilledFifty,
-      repsRemainEmpty,
-      copiedStableLoad,
-      copiedActualReps,
-      stableAfterLower,
-      stableAtSixty,
-      stableAfterDelete,
-      highSessionId,
-      newestCompletedId,
-      deletedSession: !sessionsAfterDelete.some((session) => session.id === highSessionId),
-      cascadedEntries: !entriesAfterDelete.some((entry) => entry.sessionId === highSessionId),
-      mobileActiveControls,
-      dateFocus,
-      dateFontSize,
-      saveStatus: document.querySelector('#save-status').textContent,
-      resumedProgram: document.querySelector('#program-picker').value,
-      hasHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    };
-  })()`);
-
-  assert.equal(result.forms, 8);
-  assert.ok(result.historyItems >= 2);
-  assert.match(result.historyText, /PRO Spine-Safe/);
-  assert.match(result.historyText, /Classic Athletic/);
-  assert.match(result.previous, /50.*6/);
-  assert.match(result.stableAtFifty, /50 кг/);
-  assert.equal(result.autoFilledFifty, '50');
-  assert.equal(result.repsRemainEmpty, '');
-  assert.equal(result.copiedStableLoad, '50');
-  assert.equal(result.copiedActualReps, '6');
-  assert.match(result.stableAfterLower, /50 кг/);
-  assert.match(result.stableAtSixty, /60 кг/);
-  assert.match(result.stableAfterDelete, /50 кг/);
-  assert.equal(result.highSessionId, result.newestCompletedId);
-  assert.equal(result.deletedSession, true);
-  assert.equal(result.cascadedEntries, true);
-  assert.equal(result.mobileActiveControls.every((control) => control.fontSize >= 16 && control.focused), true);
-  assert.equal(result.dateFocus, true);
-  assert.ok(result.dateFontSize >= 16);
-  assert.equal(result.resumedProgram, 'athlete-full-body-3x');
-  assert.equal(result.hasHorizontalOverflow, false);
-
-  await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `
-    (() => {
-      const users = {
-        'a@example.com': { id: '11111111-1111-4111-8111-111111111111', email: 'a@example.com' },
-        'b@example.com': { id: '22222222-2222-4222-8222-222222222222', email: 'b@example.com' },
-      };
-      const state = { session: null, listeners: [], rows: new Map() };
-      const notify = (event) => state.listeners.forEach((callback) => callback(event, state.session));
-      const client = {
-        auth: {
-          getSession: async () => ({ data: { session: state.session }, error: null }),
-          onAuthStateChange: (callback) => {
-            state.listeners.push(callback);
-            return { data: { subscription: { unsubscribe() {} } } };
-          },
-          signInWithPassword: async ({ email }) => {
-            const user = users[email];
-            if (!user) return { data: null, error: new Error('Unknown mock user') };
-            state.session = { user };
-            notify('SIGNED_IN');
-            return { data: { user, session: state.session }, error: null };
-          },
-          signUp: async ({ email }) => ({ data: { user: users[email] || null, session: null }, error: null }),
-          signOut: async () => {
-            state.session = null;
-            notify('SIGNED_OUT');
-            return { error: null };
-          },
-          resetPasswordForEmail: async () => ({ error: null }),
-          updateUser: async () => ({ data: { user: state.session?.user || null }, error: null }),
-        },
-        from() {
-          const query = { operation: 'read', payload: null, filters: {} };
-          const builder = {
-            select() { return builder; },
-            eq(column, value) { query.filters[column] = value; return builder; },
-            insert(payload) { query.operation = 'insert'; query.payload = payload; return builder; },
-            update(payload) { query.operation = 'update'; query.payload = payload; return builder; },
-            async maybeSingle() {
-              const userId = query.filters.user_id;
-              const current = state.rows.get(userId) || null;
-              if (query.operation === 'update') {
-                if (!current || current.revision !== query.filters.revision) return { data: null, error: null };
-                const next = { ...current, ...query.payload };
-                state.rows.set(userId, next);
-                return { data: next, error: null };
-              }
-              return { data: current, error: null };
-            },
-            async single() {
-              if (query.operation !== 'insert') return { data: null, error: new Error('Unexpected mock single') };
-              const row = { ...query.payload, updated_at: 'mock-' + query.payload.revision };
-              state.rows.set(row.user_id, row);
-              return { data: row, error: null };
-            },
-          };
-          return builder;
-        },
-      };
-      window.__mockCloudState = state;
-      window.__WORKOUT_CLOUD_TEST__ = {
-        config: {
-          supabaseUrl: 'https://mock.supabase.co',
-          supabasePublishableKey: 'sb_publishable_mock',
-          table: 'workout_snapshots',
-        },
-        createClient: () => client,
-      };
-    })();
-  ` });
-  await cdp.send("Page.reload", { ignoreCache: true });
-  await delay(400);
-
-  const accountResult = await evaluate(cdp, `(async () => {
-    const waitFor = async (check, message) => {
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        if (check()) return;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      throw new Error(message);
-    };
-    await waitFor(() => document.querySelector('#account-login') && !document.querySelector('#account-login').disabled, 'Configured account UI did not boot');
-    document.querySelector('.drawer-link[data-nav-id="history"]').click();
-    const guestCount = document.querySelectorAll('#history-list .history-item').length;
-    document.querySelector('#account-email').value = 'a@example.com';
-    document.querySelector('#account-password').value = 'password';
-    document.querySelector('#account-register').click();
-    await waitFor(() => document.querySelector('#cloud-status').textContent.includes('Підтвердь email'), 'Email confirmation state missing');
-    const confirmationState = document.querySelector('#cloud-status').textContent;
-    document.querySelector('#account-reset').click();
-    await waitFor(() => document.querySelector('#cloud-status').textContent.includes('відновлення пароля'), 'Password reset state missing');
-    const resetState = document.querySelector('#cloud-status').textContent;
-    const login = async (email) => {
-      document.querySelector('#account-email').value = email;
-      document.querySelector('#account-password').value = 'password';
-      document.querySelector('#account-login').click();
-      await waitFor(() => document.querySelector('#account-summary').textContent.includes(email), 'Account did not sign in: ' + email);
-    };
-    await login('a@example.com');
-    await waitFor(() => !document.querySelector('#transfer-guest-history').hidden, 'Explicit guest transfer action missing');
-    const accountBeforeTransfer = document.querySelectorAll('#history-list .history-item').length;
-    window.confirm = () => true;
-    document.querySelector('#transfer-guest-history').click();
-    await waitFor(() => document.querySelectorAll('#history-list .history-item').length === guestCount, 'Guest history was not explicitly transferred');
-    const accountAfterTransfer = document.querySelectorAll('#history-list .history-item').length;
-    const beforeAccountDelete = accountAfterTransfer;
-    document.querySelector('#history-list .history-item .action-danger').click();
-    await waitFor(() => document.querySelectorAll('#history-list .history-item').length === beforeAccountDelete - 1, 'Account-only delete failed');
-    const accountAfterDelete = document.querySelectorAll('#history-list .history-item').length;
-    document.querySelector('#history-list .history-item .action-secondary').click();
-    const accountDetailWasVisible = !document.querySelector('#history-detail').hidden && document.querySelector('#history-detail').textContent.length > 0;
-    document.querySelector('#account-logout').click();
-    await waitFor(() => document.querySelector('#account-summary').textContent.includes('гостьовий'), 'Logout did not switch to guest');
-    const guestAfterLogout = document.querySelectorAll('#history-list .history-item').length;
-    const accountDetailClearedOnLogout = document.querySelector('#history-detail').hidden && document.querySelector('#history-detail').textContent === '';
-    await login('b@example.com');
-    const userBBeforeTransfer = document.querySelectorAll('#history-list .history-item').length;
-    const dbNames = (await indexedDB.databases()).map((item) => item.name).sort();
-    return {
-      guestCount,
-      accountBeforeTransfer,
-      accountAfterTransfer,
-      accountAfterDelete,
-      accountDetailWasVisible,
-      accountDetailClearedOnLogout,
-      guestAfterLogout,
-      userBBeforeTransfer,
-      transferVisibleForB: !document.querySelector('#transfer-guest-history').hidden,
-      summary: document.querySelector('#account-summary').textContent,
-      cloudStatus: document.querySelector('#cloud-status').textContent,
-      confirmationState,
-      resetState,
-      remoteRows: window.__mockCloudState.rows.size,
-      dbNames,
-    };
-  })()`);
-
-  assert.ok(accountResult.guestCount > 0);
-  assert.equal(accountResult.accountBeforeTransfer, 0);
-  assert.equal(accountResult.accountAfterTransfer, accountResult.guestCount);
-  assert.equal(accountResult.accountAfterDelete, accountResult.accountAfterTransfer - 1);
-  assert.equal(accountResult.accountDetailWasVisible, true);
-  assert.equal(accountResult.accountDetailClearedOnLogout, true);
-  assert.equal(accountResult.guestAfterLogout, accountResult.guestCount);
-  assert.equal(accountResult.userBBeforeTransfer, 0);
-  assert.equal(accountResult.transferVisibleForB, true);
-  assert.match(accountResult.summary, /b@example\.com/);
-  assert.match(accountResult.confirmationState, /Підтвердь email/);
-  assert.match(accountResult.resetState, /відновлення пароля/);
-  assert.ok(accountResult.remoteRows >= 2);
-  assert.ok(accountResult.dbNames.includes('workout-program'));
-  assert.ok(accountResult.dbNames.includes('workout-program-user-11111111-1111-4111-8111-111111111111'));
-  assert.ok(accountResult.dbNames.includes('workout-program-user-22222222-2222-4222-8222-222222222222'));
   assert.deepEqual(cdp.exceptions, []);
   assert.deepEqual(cdp.consoleErrors, []);
   assert.deepEqual(cdp.logErrors, []);
   assert.deepEqual(cdp.httpErrors, []);
   console.log(`PASS browser smoke: ${JSON.stringify({
-    guest: result,
-    account: accountResult,
+    readOnly: readOnlyState,
+    reload: reloadState,
     screenshots: [mobileDashboardScreenshot, mobileDrawerScreenshot, desktopDashboardScreenshot, desktopDrawerScreenshot],
   })}`);
   cdp.socket.close();

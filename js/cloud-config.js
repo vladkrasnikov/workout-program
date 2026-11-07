@@ -1,4 +1,4 @@
-// Public browser configuration. Leave URL/key empty to keep local guest mode.
+// Public browser configuration. With an empty URL/key the app is catalog-only.
 // Never place a Supabase service_role key in this file.
 export default Object.freeze({
   supabaseUrl: "",

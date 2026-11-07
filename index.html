@@ -11,7 +11,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/styles.css">
-  <meta name="workout-app-build" content="v6">
+  <meta name="workout-app-build" content="v7">
   <script>
     (() => {
       const build = document.querySelector('meta[name="workout-app-build"]').content;
@@ -116,7 +116,7 @@
       };
 
       const watchdog = setTimeout(() => {
-        if (!ready) showDiagnostic("Застосунок не завершив запуск. Перезавантажте сторінку; локальні тренування залишаться у браузері.");
+        if (!ready) showDiagnostic("Застосунок не завершив запуск. Перезавантажте сторінку; кеш авторизованого акаунта не буде видалено.");
       }, 10000);
 
       window.__WORKOUT_BOOT__ = Object.freeze({ build, ready: markReady, fail: showDiagnostic });
@@ -145,7 +145,7 @@
       <div class="brand-block"><h1>Training Hub</h1><p>5 програм · робочі підходи · прогрес</p></div>
       <div class="header-actions">
         <button id="apply-update" class="update-btn" type="button" hidden>Оновити</button>
-        <span id="app-connection-status" class="status-badge">Локальний журнал</span>
+        <span id="app-connection-status" class="status-badge">Потрібен вхід</span>
       </div>
     </div>
   </header>
@@ -160,9 +160,9 @@
       <button class="drawer-link" type="button" data-section="journal" data-nav-id="journal" aria-controls="tab-journal" aria-current="page">Журнал тренувань</button>
       <button class="drawer-link" type="button" data-section="history" data-nav-id="history" aria-controls="tab-history">Історія</button>
       <button class="drawer-link" type="button" data-section="guide" data-nav-id="guide" aria-controls="tab-guide">База знань</button>
-      <button class="drawer-link drawer-link-account" type="button" data-section="history" data-nav-id="account" data-focus-target="account-title" aria-controls="tab-history">Акаунт і хмарна копія</button>
+      <button class="drawer-link drawer-link-account" type="button" data-section="account" data-nav-id="account" aria-controls="tab-account">Акаунт і синхронізація</button>
     </nav>
-    <p class="drawer-note">Усі тренування спочатку зберігаються локально у вашому браузері.</p>
+    <p class="drawer-note">Каталог доступний усім. Історія та прогрес зберігаються у вашому Supabase-акаунті.</p>
   </aside>
 
   <main>
@@ -174,7 +174,7 @@
     <noscript>
       <section class="card card-amber" role="alert">
         <h2>JavaScript вимкнено</h2>
-        <p>Увімкніть JavaScript, щоб завантажити каталог програм і локальну історію тренувань.</p>
+        <p>Увімкніть JavaScript, щоб завантажити каталог програм і увійти до особистої історії.</p>
       </section>
     </noscript>
     <section id="tab-journal" class="main-tab" aria-labelledby="journal-title">
@@ -199,7 +199,7 @@
             <button id="start-workout" class="action-btn action-primary" type="button">Почати тренування</button>
             <button id="finish-workout" class="action-btn action-success" type="button" disabled>Завершити</button>
           </div>
-          <p class="session-hint">Чернетка автоматично зберігається в цьому браузері.</p>
+          <p id="session-access-hint" class="session-hint">Увійдіть, щоб записувати підходи та зберігати прогрес у хмарі.</p>
         </section>
       </div>
 
@@ -212,6 +212,12 @@
     </section>
 
     <section id="tab-history" class="main-tab" aria-labelledby="history-title" hidden>
+      <section id="history-locked" class="card access-card" aria-labelledby="history-locked-title">
+        <h2 id="history-locked-title">Історія доступна після входу</h2>
+        <p>Увійдіть або зареєструйтеся, щоб бачити лише власні тренування й прогрес.</p>
+        <button class="action-btn action-primary open-account" type="button">Увійти або зареєструватися</button>
+      </section>
+      <div id="personal-history-content" hidden>
       <div class="card">
         <div class="section-heading">
           <div><h2 id="history-title" tabindex="-1">Історія тренувань</h2><p>Фільтруй за програмою та днем, відкривай деталі або продовжуй редагування.</p></div>
@@ -221,10 +227,17 @@
         <div id="history-list" class="history-list" aria-live="polite"></div>
       </div>
       <div id="history-detail" class="card history-detail" hidden aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section id="tab-account" class="main-tab" aria-labelledby="account-title" hidden>
       <section class="card account-card" aria-labelledby="account-title">
         <div class="section-heading">
-          <div><h2 id="account-title" tabindex="-1">Акаунт і хмарна копія</h2><p id="account-summary">Локальний гостьовий профіль.</p></div>
+          <div><h2 id="account-title" tabindex="-1">Акаунт і синхронізація</h2><p id="account-summary">Увійдіть, щоб вести особистий журнал тренувань.</p></div>
           <button id="account-logout" class="action-btn action-secondary" type="button" hidden>Вийти</button>
+        </div>
+        <div id="cloud-setup-message" class="setup-message" role="status" hidden>
+          Supabase не налаштовано. Каталог працює у режимі читання; адміністратору потрібно заповнити <code>js/cloud-config.js</code>.
         </div>
         <form id="account-form" class="account-form">
           <label class="field-label" for="account-email">Email<input id="account-email" type="email" autocomplete="email" required></label>
@@ -240,7 +253,7 @@
           <button class="action-btn action-primary" type="submit">Зберегти новий пароль</button>
         </form>
         <div id="account-tools" class="account-tools" hidden>
-          <button id="transfer-guest-history" class="action-btn action-secondary" type="button" hidden>Перенести гостьову історію в акаунт</button>
+          <button id="import-legacy-data" class="action-btn action-secondary" type="button" hidden>Імпортувати старі локальні дані</button>
           <div id="sync-conflict-actions" class="account-actions" hidden>
             <span>Є конфлікт локальної та хмарної історії.</span>
             <button id="sync-use-local" class="action-btn action-secondary" type="button">Використати локальну</button>
@@ -249,9 +262,9 @@
         </div>
         <output id="cloud-status" class="backup-status" aria-live="polite"></output>
       </section>
-      <section class="card backup-card" aria-labelledby="backup-title">
+      <section id="backup-tools" class="card backup-card" aria-labelledby="backup-title" hidden>
         <h2 id="backup-title">Резервна копія</h2>
-        <p>Дані живуть у браузері. JSON переносить історію між пристроями та доменами.</p>
+        <p>JSON — ручна резервна копія даних поточного акаунта. Імпорт одразу синхронізується з Supabase.</p>
         <div class="backup-actions">
           <button id="export-backup" class="action-btn action-primary" type="button">Експортувати JSON</button>
           <label class="action-btn action-secondary file-action" for="import-backup">Імпортувати JSON</label>

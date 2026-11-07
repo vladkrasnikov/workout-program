@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "workout-program-shell-";
-const CACHE_VERSION = "v6";
+const CACHE_VERSION = "v7";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const BASE_URL = new URL("./", self.location.href);
 const INDEX_URL = new URL("./index.html", BASE_URL).href;
