@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node tests/run-tests.mjs",
-    "test:browser": "node tests/browser-smoke.mjs"
+    "test:browser": "node tests/browser-smoke.mjs",
+    "test:pwa-upgrade": "node tests/pwa-upgrade-smoke.mjs"
   }
 }

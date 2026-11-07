@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "workout-program-shell-";
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v5";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const BASE_URL = new URL("./", self.location.href);
 const INDEX_URL = new URL("./index.html", BASE_URL).href;
@@ -32,12 +32,28 @@ const APP_SHELL = [
   "./js/catalog/upper-lower.js",
   "./js/catalog/minimalist.js"
 ];
+const APP_SHELL_BY_PATH = new Map(APP_SHELL.map((path) => {
+  const url = new URL(path, BASE_URL);
+  return [url.pathname, url.href];
+}));
+const missingShellResponse = () => new Response("Cached application shell is incomplete", {
+  status: 503,
+  statusText: "Cached shell incomplete",
+  headers: { "content-type": "text/plain; charset=utf-8" },
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => (
-      cache.addAll(APP_SHELL.map((path) => new URL(path, BASE_URL)))
-    ))
+    (async () => {
+      await caches.delete(CACHE_NAME);
+      const cache = await caches.open(CACHE_NAME);
+      try {
+        await cache.addAll(APP_SHELL.map((path) => new URL(path, BASE_URL)));
+      } catch (error) {
+        await caches.delete(CACHE_NAME);
+        throw error;
+      }
+    })()
   );
 });
 
@@ -52,6 +68,15 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "GET_BUILD_VERSION") {
+    event.ports?.[0]?.postMessage({
+      type: "BUILD_VERSION",
+      build: CACHE_VERSION,
+      shellPolicy: "cache-only",
+      baseUrl: BASE_URL.href,
+    });
+    return;
+  }
   if (event.data?.type === "APPLY_UPDATE") {
     self.skipWaiting();
   }
@@ -65,36 +90,30 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            event.waitUntil(
-              caches.open(CACHE_NAME).then((cache) => cache.put(INDEX_URL, copy))
-            );
-          }
-          return response;
-        })
-        .catch(async () => (
-          await caches.match(INDEX_URL, { cacheName: CACHE_NAME })
-          || await caches.match(ROOT_URL, { cacheName: CACHE_NAME })
-          || Response.error()
-        ))
+      caches.open(CACHE_NAME).then(async (cache) => (
+        await cache.match(INDEX_URL)
+        || await cache.match(ROOT_URL)
+        || await fetch(event.request)
+      ))
+    );
+    return;
+  }
+
+  const shellUrl = APP_SHELL_BY_PATH.get(requestUrl.pathname);
+  if (shellUrl) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => (
+        await cache.match(shellUrl)
+        || missingShellResponse()
+      ))
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const refreshed = fetch(event.request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
-      }).catch(() => cached || Response.error());
-
-      return cached || refreshed;
-    })
+    caches.open(CACHE_NAME).then(async (cache) => (
+      await cache.match(event.request)
+      || await fetch(event.request)
+    ))
   );
 });

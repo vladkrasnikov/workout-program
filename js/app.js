@@ -1049,9 +1049,15 @@ async function registerServiceWorker() {
       updateButton.hidden = false;
       updateButton.onclick = async () => {
         try {
+          updateButton.disabled = true;
+          updateButton.textContent = "Оновлення…";
           if (state.active) await flushSaves();
           worker.postMessage({ type: "APPLY_UPDATE" });
-        } catch (error) { reportError(error); }
+        } catch (error) {
+          updateButton.disabled = false;
+          updateButton.textContent = "Оновити";
+          reportError(error);
+        }
       };
     };
     showUpdate(registration.waiting);
@@ -1068,17 +1074,21 @@ async function registerServiceWorker() {
 }
 
 async function boot() {
-  byId("workout-date").value = localDateString();
-  wireControls();
-  renderProgramGuide();
-  updateTabAria();
-  updateConnectionStatus();
-  addEventListener("online", () => {
-    updateConnectionStatus();
-    void runCloudSync("відновлення мережі");
-  });
-  addEventListener("offline", updateConnectionStatus);
   try {
+    byId("workout-date").value = localDateString();
+    wireControls();
+    renderProgramGuide();
+    updateTabAria();
+    updateConnectionStatus();
+    selectProgram(DEFAULT_PROGRAM_ID);
+    renderJournal();
+    renderHistory();
+    renderAccount();
+    addEventListener("online", () => {
+      updateConnectionStatus();
+      void runCloudSync("відновлення мережі");
+    });
+    addEventListener("offline", updateConnectionStatus);
     await initializeCloud();
     await loadCurrentScope({ render: false });
     if (state.cloud.sync) await runCloudSync("запуск");
@@ -1087,12 +1097,15 @@ async function boot() {
     renderHistory();
     renderAccount();
     await updateTransferAvailability();
+    globalThis.__WORKOUT_BOOT__?.ready();
   } catch (error) {
     reportError(error);
     byId("start-workout").disabled = true;
     byId("active-session-summary").textContent = "Локальне сховище недоступне. Перевір режим браузера та дозволи сайту.";
+    globalThis.__WORKOUT_BOOT__?.fail(`Застосунок запустився не повністю: ${error.message}`);
+  } finally {
+    void registerServiceWorker();
   }
-  void registerServiceWorker();
 }
 
 void boot();

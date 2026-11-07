@@ -16,6 +16,28 @@ test("PWA app shell contains every local resource and cloud integration module",
   assert.doesNotMatch(source.match(/const APP_SHELL = \[[\s\S]*?\];/)?.[0] ?? "", /https?:\/\//);
 });
 
+test("PWA shell is version-consistent and exposes its build to the boot gate", async () => {
+  const [worker, html] = await Promise.all([
+    readFile(resolve(root, "sw.js"), "utf8"),
+    readFile(resolve(root, "index.html"), "utf8"),
+  ]);
+  const workerBuild = worker.match(/const CACHE_VERSION = "([^"]+)"/)?.[1];
+  const documentBuild = html.match(/<meta name="workout-app-build" content="([^"]+)">/)?.[1];
+  assert.ok(workerBuild, "service worker build must be declared");
+  assert.equal(documentBuild, workerBuild, "document and service worker builds must match");
+  assert.match(worker, /GET_BUILD_VERSION/);
+  assert.match(worker, /cache\.match\(INDEX_URL\)/);
+  assert.match(worker, /const APP_SHELL_BY_PATH = new Map/);
+  assert.match(worker, /const missingShellResponse = \(\) => new Response[\s\S]*?status: 503/);
+  assert.match(worker, /const shellUrl = APP_SHELL_BY_PATH\.get\(requestUrl\.pathname\)[\s\S]*?cache\.match\(shellUrl\)[\s\S]*?missingShellResponse\(\)/);
+  assert.doesNotMatch(worker, /cache\.put\(INDEX_URL/);
+  assert.doesNotMatch(worker, /return cached \|\| refreshed/);
+  assert.doesNotMatch(html, /<script\s+type="module"\s+src="\.\/js\/app\.js"/);
+  assert.match(html, /import\("\.\/js\/app\.js"\)/);
+  assert.match(html, /id="boot-diagnostic"/);
+  assert.match(html, /<noscript>/);
+});
+
 test("default cloud config is guest-safe and contains no service role credential", async () => {
   const source = await readFile(resolve(root, "js/cloud-config.js"), "utf8");
   assert.match(source, /supabaseUrl:\s*""/);

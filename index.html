@@ -11,7 +11,129 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/styles.css">
-  <script type="module" src="./js/app.js"></script>
+  <meta name="workout-app-build" content="v5">
+  <script>
+    (() => {
+      const build = document.querySelector('meta[name="workout-app-build"]').content;
+      let ready = false;
+      let applyingUpdate = false;
+      let pendingFailure = null;
+
+      const diagnosticElements = () => ({
+        panel: document.getElementById("boot-diagnostic"),
+        message: document.getElementById("boot-diagnostic-message"),
+        action: document.getElementById("boot-diagnostic-action"),
+      });
+
+      const showDiagnostic = (message, actionLabel = "Спробувати ще раз", action = () => location.reload()) => {
+        pendingFailure = { message, actionLabel, action };
+        const { panel, message: output, action: button } = diagnosticElements();
+        if (!panel || !output || !button) return;
+        output.textContent = message;
+        button.textContent = actionLabel;
+        button.onclick = action;
+        panel.hidden = false;
+      };
+
+      const markReady = () => {
+        ready = true;
+        clearTimeout(watchdog);
+        const { panel } = diagnosticElements();
+        if (panel) panel.hidden = true;
+      };
+
+      const queryControllerBuild = (controller) => new Promise((resolve) => {
+        if (!controller) return resolve(null);
+        const channel = new MessageChannel();
+        const timeout = setTimeout(() => resolve(null), 800);
+        channel.port1.onmessage = (event) => {
+          clearTimeout(timeout);
+          resolve(event.data?.type === "BUILD_VERSION" ? event.data.build : null);
+        };
+        controller.postMessage({ type: "GET_BUILD_VERSION" }, [channel.port2]);
+      });
+
+      const waitForWaitingWorker = async (registration) => {
+        if (registration.waiting) return registration.waiting;
+        const worker = registration.installing;
+        if (!worker) return null;
+        if (worker.state === "installed") return worker;
+        return new Promise((resolve) => {
+          const timeout = setTimeout(() => resolve(null), 10000);
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed") {
+              clearTimeout(timeout);
+              resolve(worker);
+            } else if (worker.state === "redundant") {
+              clearTimeout(timeout);
+              resolve(null);
+            }
+          });
+        });
+      };
+
+      const loadApplication = () => import("./js/app.js").catch((error) => {
+        console.error("Application module failed to load", error);
+        showDiagnostic(`Не вдалося завантажити модулі застосунку: ${error.message}`);
+      });
+
+      const start = async () => {
+        if (pendingFailure) showDiagnostic(pendingFailure.message, pendingFailure.actionLabel, pendingFailure.action);
+        if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
+          await loadApplication();
+          return;
+        }
+
+        const controllerBuild = await queryControllerBuild(navigator.serviceWorker.controller);
+        if (controllerBuild === build) {
+          await loadApplication();
+          return;
+        }
+
+        try {
+          const registration = await navigator.serviceWorker.getRegistration("./");
+          if (!registration) throw new Error("реєстрацію service worker не знайдено");
+          await registration.update();
+          const worker = await waitForWaitingWorker(registration);
+          if (!worker) throw new Error("нову версію не вдалося підготувати");
+          showDiagnostic(
+            "Виявлено несумісні версії сторінки та локального кешу. Застосуйте готове оновлення, щоб безпечно відкрити каталог.",
+            "Застосувати оновлення",
+            () => {
+              applyingUpdate = true;
+              const { action } = diagnosticElements();
+              if (action) {
+                action.disabled = true;
+                action.textContent = "Оновлення…";
+              }
+              worker.postMessage({ type: "APPLY_UPDATE" });
+            },
+          );
+        } catch (error) {
+          console.error("Could not prepare a coherent app update", error);
+          showDiagnostic(`Версії застосунку не збігаються: ${error.message}. Перевірте мережу та повторіть спробу.`);
+        }
+      };
+
+      const watchdog = setTimeout(() => {
+        if (!ready) showDiagnostic("Застосунок не завершив запуск. Перезавантажте сторінку; локальні тренування залишаться у браузері.");
+      }, 10000);
+
+      window.__WORKOUT_BOOT__ = Object.freeze({ build, ready: markReady, fail: showDiagnostic });
+      window.addEventListener("error", (event) => {
+        if (!ready && event.target instanceof HTMLScriptElement) {
+          showDiagnostic("Не вдалося завантажити код застосунку. Перевірте мережу та оновіть сторінку.");
+        }
+      }, true);
+      window.addEventListener("unhandledrejection", (event) => {
+        if (!ready) showDiagnostic(`Помилка запуску: ${event.reason?.message || "невідома помилка"}`);
+      });
+      navigator.serviceWorker?.addEventListener("controllerchange", () => {
+        if (applyingUpdate) location.reload();
+      });
+      addEventListener("DOMContentLoaded", () => void start(), { once: true });
+    })();
+  </script>
   <title>Training Hub — журнал тренувань</title>
 </head>
 <body>
@@ -28,6 +150,17 @@
   </header>
 
   <main>
+    <section id="boot-diagnostic" class="card card-amber" role="alert" aria-live="assertive" hidden>
+      <h2>Потрібна увага</h2>
+      <p id="boot-diagnostic-message">Застосунок ще запускається.</p>
+      <button id="boot-diagnostic-action" class="action-btn action-primary" type="button">Спробувати ще раз</button>
+    </section>
+    <noscript>
+      <section class="card card-amber" role="alert">
+        <h2>JavaScript вимкнено</h2>
+        <p>Увімкніть JavaScript, щоб завантажити каталог програм і локальну історію тренувань.</p>
+      </section>
+    </noscript>
     <section id="tab-journal" class="main-tab" aria-labelledby="journal-title">
       <h2 id="journal-title" class="visually-hidden">Журнал тренування</h2>
       <section class="card picker-card" aria-labelledby="program-picker-title">
