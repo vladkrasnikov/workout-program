@@ -11,7 +11,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/styles.css">
-  <meta name="workout-app-build" content="v5">
+  <meta name="workout-app-build" content="v6">
   <script>
     (() => {
       const build = document.querySelector('meta[name="workout-app-build"]').content;
@@ -137,17 +137,33 @@
   <title>Training Hub — журнал тренувань</title>
 </head>
 <body>
-  <input class="state-radio" type="radio" name="main-nav" id="nav-journal" checked>
-  <input class="state-radio" type="radio" name="main-nav" id="nav-history">
-  <input class="state-radio" type="radio" name="main-nav" id="nav-guide">
-
   <header class="app-header">
-    <div><h1>Training Hub</h1><p>5 програм · робочі підходи · прогрес</p></div>
-    <div class="header-actions">
-      <button id="apply-update" class="update-btn" type="button" hidden>Оновити</button>
-      <span id="app-connection-status" class="status-badge">Локальний журнал</span>
+    <div class="header-inner">
+      <button id="menu-toggle" class="menu-toggle" type="button" aria-expanded="false" aria-controls="app-drawer" aria-label="Відкрити меню">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <div class="brand-block"><h1>Training Hub</h1><p>5 програм · робочі підходи · прогрес</p></div>
+      <div class="header-actions">
+        <button id="apply-update" class="update-btn" type="button" hidden>Оновити</button>
+        <span id="app-connection-status" class="status-badge">Локальний журнал</span>
+      </div>
     </div>
   </header>
+
+  <div id="menu-backdrop" class="menu-backdrop" hidden></div>
+  <aside id="app-drawer" class="app-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-heading">
+      <div><span class="drawer-kicker">Training Hub</span><h2 id="drawer-title">Навігація</h2></div>
+      <button id="menu-close" class="menu-close" type="button" aria-label="Закрити меню">×</button>
+    </div>
+    <nav class="drawer-nav" aria-label="Основні розділи">
+      <button class="drawer-link" type="button" data-section="journal" data-nav-id="journal" aria-controls="tab-journal" aria-current="page">Журнал тренувань</button>
+      <button class="drawer-link" type="button" data-section="history" data-nav-id="history" aria-controls="tab-history">Історія</button>
+      <button class="drawer-link" type="button" data-section="guide" data-nav-id="guide" aria-controls="tab-guide">База знань</button>
+      <button class="drawer-link drawer-link-account" type="button" data-section="history" data-nav-id="account" data-focus-target="account-title" aria-controls="tab-history">Акаунт і хмарна копія</button>
+    </nav>
+    <p class="drawer-note">Усі тренування спочатку зберігаються локально у вашому браузері.</p>
+  </aside>
 
   <main>
     <section id="boot-diagnostic" class="card card-amber" role="alert" aria-live="assertive" hidden>
@@ -162,29 +178,32 @@
       </section>
     </noscript>
     <section id="tab-journal" class="main-tab" aria-labelledby="journal-title">
-      <h2 id="journal-title" class="visually-hidden">Журнал тренування</h2>
-      <section class="card picker-card" aria-labelledby="program-picker-title">
-        <div class="section-heading"><div><h2 id="program-picker-title">Програма</h2><p>Обери напрям і програму. Під час тренування вибір зафіксований.</p></div></div>
-        <div class="picker-grid">
-          <label class="field-label" for="category-picker">Категорія<select id="category-picker"></select></label>
-          <label class="field-label" for="program-picker">Програма<select id="program-picker"></select></label>
-        </div>
-        <div id="program-summary" class="program-summary" aria-live="polite"></div>
-      </section>
+      <h2 id="journal-title" class="visually-hidden" tabindex="-1">Журнал тренування</h2>
+      <div class="journal-dashboard">
+        <section class="card picker-card" aria-labelledby="program-picker-title">
+          <div class="section-heading"><div><span class="section-kicker">План</span><h2 id="program-picker-title">Обери програму</h2><p>Напрям, графік і навантаження можна змінити до початку тренування.</p></div></div>
+          <div class="picker-grid">
+            <label class="field-label" for="category-picker">Категорія<select id="category-picker"></select></label>
+            <label class="field-label" for="program-picker">Програма<select id="program-picker"></select></label>
+          </div>
+          <div id="program-summary" class="program-summary" aria-live="polite" tabindex="-1"></div>
+        </section>
+
+        <section class="card session-card" aria-labelledby="session-title">
+          <div class="session-heading">
+            <div><span class="section-kicker">Сьогодні</span><h2 id="session-title">Поточне тренування</h2><p id="active-session-summary" tabindex="-1">Обери програму, день і дату.</p></div>
+            <output id="save-status" class="save-status" aria-live="polite">Готово</output>
+          </div>
+          <div class="session-controls">
+            <label class="field-label" for="workout-date">Дата<input id="workout-date" type="date"></label>
+            <button id="start-workout" class="action-btn action-primary" type="button">Почати тренування</button>
+            <button id="finish-workout" class="action-btn action-success" type="button" disabled>Завершити</button>
+          </div>
+          <p class="session-hint">Чернетка автоматично зберігається в цьому браузері.</p>
+        </section>
+      </div>
 
       <div id="day-tabs" class="day-tabs" role="tablist" aria-label="Дні програми"></div>
-      <section class="card session-card" aria-labelledby="session-title">
-        <div class="session-heading">
-          <div><h2 id="session-title">Поточне тренування</h2><p id="active-session-summary">Обери програму, день і дату.</p></div>
-          <output id="save-status" class="save-status" aria-live="polite">Готово</output>
-        </div>
-        <div class="session-controls">
-          <label class="field-label" for="workout-date">Дата<input id="workout-date" type="date"></label>
-          <button id="start-workout" class="action-btn action-primary" type="button">Почати тренування</button>
-          <button id="finish-workout" class="action-btn action-success" type="button" disabled>Завершити</button>
-        </div>
-        <p class="session-hint">Чернетка автоматично зберігається в цьому браузері.</p>
-      </section>
 
       <section aria-labelledby="exercises-title">
         <div class="day-heading"><h2 id="exercises-title">Вправи</h2><p id="day-focus"></p></div>
@@ -192,10 +211,10 @@
       </section>
     </section>
 
-    <section id="tab-history" class="main-tab" aria-labelledby="history-title">
+    <section id="tab-history" class="main-tab" aria-labelledby="history-title" hidden>
       <div class="card">
         <div class="section-heading">
-          <div><h2 id="history-title">Історія тренувань</h2><p>Фільтруй за програмою та днем, відкривай деталі або продовжуй редагування.</p></div>
+          <div><h2 id="history-title" tabindex="-1">Історія тренувань</h2><p>Фільтруй за програмою та днем, відкривай деталі або продовжуй редагування.</p></div>
           <button id="add-past-workout" class="action-btn action-secondary" type="button">Додати минуле</button>
         </div>
         <div id="history-filters" class="history-filters" aria-label="Фільтри історії"></div>
@@ -204,7 +223,7 @@
       <div id="history-detail" class="card history-detail" hidden aria-live="polite"></div>
       <section class="card account-card" aria-labelledby="account-title">
         <div class="section-heading">
-          <div><h2 id="account-title">Акаунт і хмарна копія</h2><p id="account-summary">Локальний гостьовий профіль.</p></div>
+          <div><h2 id="account-title" tabindex="-1">Акаунт і хмарна копія</h2><p id="account-summary">Локальний гостьовий профіль.</p></div>
           <button id="account-logout" class="action-btn action-secondary" type="button" hidden>Вийти</button>
         </div>
         <form id="account-form" class="account-form">
@@ -242,8 +261,8 @@
       </section>
     </section>
 
-    <section id="tab-guide" class="main-tab" aria-labelledby="guide-title">
-      <div class="card guide-hero"><h2 id="guide-title">База знань</h2><p>Як обрати програму, підготуватися до підходів і прогресувати. Детальна техніка кожної вправи знаходиться в її картці.</p></div>
+    <section id="tab-guide" class="main-tab" aria-labelledby="guide-title" hidden>
+      <div class="card guide-hero"><h2 id="guide-title" tabindex="-1">База знань</h2><p>Як обрати програму, підготуватися до підходів і прогресувати. Детальна техніка кожної вправи знаходиться в її картці.</p></div>
       <div class="guide-grid">
         <article class="card guide-wide"><h3>Яку програму обрати</h3><div id="program-guide-list" class="program-guide-list" aria-live="polite"></div></article>
         <article class="card"><h3>4-хвилинна CNS-розминка</h3><ol><li>Кола плечима та п’ять спокійних видихів із опусканням ребер — 90 секунд.</li><li>Розкриття таза у напіввипаді — близько 35 секунд на сторону.</li><li>У першій базовій вправі: 50% робочої ваги × 6, потім 75% × 3. Для наступних рухів достатньо одного підвідного сету.</li></ol><p>Розминка має підготувати суглоби й техніку, не створити втому до робочих підходів.</p></article>
@@ -255,10 +274,5 @@
     </section>
   </main>
 
-  <nav class="bottom-nav" role="tablist" aria-label="Основні розділи">
-    <label for="nav-journal" class="nav-btn" role="tab" tabindex="0" aria-controls="tab-journal" aria-selected="true"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>Журнал</label>
-    <label for="nav-history" class="nav-btn" role="tab" tabindex="-1" aria-controls="tab-history" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>Історія</label>
-    <label for="nav-guide" class="nav-btn" role="tab" tabindex="-1" aria-controls="tab-guide" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5a3 3 0 0 1 3-3h13v17H7a3 3 0 0 0-3 3zM7 2v17"/></svg>Довідка</label>
-  </nav>
 </body>
 </html>

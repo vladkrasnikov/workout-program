@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, createReadStream } from "node:fs";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CATEGORIES, PROGRAM_LIST } from "../js/program.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const HOST = "127.0.0.1";
+const QA_ARTIFACTS = join(tmpdir(), "workout-program-qa");
 const MIME = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -89,9 +91,21 @@ async function connectCdp(webSocketDebuggerUrl) {
   let id = 0;
   const pending = new Map();
   const exceptions = [];
+  const consoleErrors = [];
+  const logErrors = [];
+  const httpErrors = [];
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (message.method === "Runtime.exceptionThrown") exceptions.push(message.params.exceptionDetails.text);
+    if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
+      consoleErrors.push(message.params.args.map((argument) => argument.value ?? argument.description ?? "").join(" "));
+    }
+    if (message.method === "Log.entryAdded" && message.params.entry.level === "error") {
+      logErrors.push(message.params.entry.text);
+    }
+    if (message.method === "Network.responseReceived" && message.params.response.status >= 400) {
+      httpErrors.push(`${message.params.response.status} ${message.params.response.url}`);
+    }
     if (!message.id || !pending.has(message.id)) return;
     const { resolve, reject } = pending.get(message.id);
     pending.delete(message.id);
@@ -103,13 +117,63 @@ async function connectCdp(webSocketDebuggerUrl) {
     pending.set(requestId, { resolve, reject });
     socket.send(JSON.stringify({ id: requestId, method, params }));
   });
-  return { socket, send, exceptions };
+  return { socket, send, exceptions, consoleErrors, logErrors, httpErrors };
 }
+
+function formatDurationMinutes(duration) {
+  if (Number.isFinite(duration)) return `близько ${duration} хв`;
+  if (duration && Number.isFinite(duration.min) && Number.isFinite(duration.max)) {
+    return duration.min === duration.max ? `${duration.min} хв` : `${duration.min}–${duration.max} хв`;
+  }
+  return "тривалість залежить від темпу";
+}
+
+const EXPECTED_CATALOG_MATRIX = {
+  categories: CATEGORIES.map(({ id, name }) => ({ id, name })),
+  programs: PROGRAM_LIST.map((program) => ({
+    id: program.id,
+    categoryId: program.categoryId,
+    name: program.name,
+    description: program.description,
+    audience: `Для кого: ${program.audience}`,
+    frequency: `${program.frequency.sessionsPerWeek}× на тиждень · ${formatDurationMinutes(program.frequency.durationMinutes)}`,
+    days: program.days.map((day) => ({
+      id: day.id,
+      name: day.name,
+      focus: day.focus,
+      cards: day.cards.map((card) => ({
+        id: card.id,
+        name: card.name,
+        shortAlternative: card.shortAlternative ?? "",
+        params: [...card.params],
+        technique: (card.content?.technique ?? []).map(({ heading, text }) => ({ heading, text })),
+        alternatives: [...(card.content?.alternatives ?? [])],
+        cue: card.content?.cue ?? "",
+      })),
+    })),
+  })),
+  guide: PROGRAM_LIST.map((program) => ({
+    id: program.id,
+    name: program.name,
+    description: program.description,
+    audience: `Для кого: ${program.audience}`,
+    meta: `${program.frequency.sessionsPerWeek}× на тиждень · ${formatDurationMinutes(program.frequency.durationMinutes)} · ${program.days.length} типи тренувань`,
+    action: "Обрати програму",
+  })),
+};
 
 async function evaluate(cdp, expression) {
   const response = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text);
   return response.result.value;
+}
+
+async function captureScreenshot(cdp, filename) {
+  await mkdir(QA_ARTIFACTS, { recursive: true });
+  const result = await cdp.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+  const path = join(QA_ARTIFACTS, filename);
+  await writeFile(path, Buffer.from(result.data, "base64"));
+  return path;
 }
 
 const browser = findBrowser();
@@ -146,6 +210,8 @@ try {
   const cdp = await connectCdp(target.webSocketDebuggerUrl);
   await cdp.send("Runtime.enable");
   await cdp.send("Page.enable");
+  await cdp.send("Log.enable");
+  await cdp.send("Network.enable");
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 390,
     height: 844,
@@ -207,8 +273,238 @@ try {
     return true;
   })()`);
   assert.equal(seeded, true);
+  cdp.exceptions.length = 0;
+  cdp.consoleErrors.length = 0;
+  cdp.logErrors.length = 0;
+  cdp.httpErrors.length = 0;
   await cdp.send("Page.navigate", { url: pageUrl });
   await delay(300);
+
+  const catalogMatrix = await evaluate(cdp, `(async () => {
+    const waitFor = async (check, message) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (check()) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error(message);
+    };
+    await waitFor(() => document.querySelector('#category-picker')?.options.length === 5
+      && document.querySelectorAll('#program-guide-list .program-guide-item').length === 5,
+    'Program catalog did not render');
+    const readOptions = (select) => [...select.options].map((option) => ({ id: option.value, name: option.textContent }));
+    const programs = [];
+    const programOptionsByCategory = {};
+    for (const expected of ${JSON.stringify(EXPECTED_CATALOG_MATRIX.programs)}) {
+      const category = document.querySelector('#category-picker');
+      category.value = expected.categoryId;
+      category.dispatchEvent(new Event('change', { bubbles: true }));
+      await waitFor(() => document.querySelector('#program-picker')?.value === expected.id,
+        'Program picker did not follow category ' + expected.categoryId);
+      const programPicker = document.querySelector('#program-picker');
+      programOptionsByCategory[expected.categoryId] = readOptions(programPicker);
+      programPicker.value = expected.id;
+      programPicker.dispatchEvent(new Event('change', { bubbles: true }));
+      await waitFor(() => document.querySelector('#program-summary .program-title')?.textContent === expected.name,
+        'Program summary did not render ' + expected.id);
+      const days = [];
+      for (const expectedDay of expected.days) {
+        document.querySelector('.day-tab[data-day-id="' + expectedDay.id + '"]').click();
+        await waitFor(() => document.querySelector('#exercises-title')?.textContent.startsWith(expectedDay.name)
+          && document.querySelectorAll('#exercise-list .exercise-item').length === expectedDay.cards.length,
+        'Day cards did not render ' + expected.id + '/' + expectedDay.id);
+        days.push({
+          id: expectedDay.id,
+          name: document.querySelector('.day-tab[aria-selected="true"]').title,
+          focus: document.querySelector('#day-focus').textContent,
+          cards: [...document.querySelectorAll('#exercise-list .exercise-item')].map((card) => ({
+            id: card.dataset.cardId,
+            name: card.querySelector('.exercise-name')?.textContent ?? '',
+            shortAlternative: card.querySelector('.exercise-sub-alt')?.textContent ?? '',
+            params: [...card.querySelectorAll('.exercise-params .param-badge')].map((node) => node.textContent),
+            technique: [...card.querySelectorAll('.tech-item')].map((node) => ({
+              heading: node.querySelector('strong')?.textContent ?? '',
+              text: node.querySelector('p')?.textContent ?? '',
+            })),
+            alternatives: [...card.querySelectorAll('.alt-item')].map((node) => node.textContent),
+            cue: card.querySelector('.cue-box')?.textContent ?? '',
+          })),
+        });
+      }
+      programs.push({
+        id: expected.id,
+        categoryId: expected.categoryId,
+        name: document.querySelector('#program-summary .program-title').textContent,
+        description: document.querySelector('#program-summary .program-title + p').textContent,
+        audience: document.querySelector('#program-summary .program-audience').textContent,
+        frequency: document.querySelector('#program-summary .program-meta').textContent,
+        days,
+      });
+    }
+    const guide = [...document.querySelectorAll('#program-guide-list .program-guide-item')].map((item) => ({
+      id: item.dataset.programId,
+      name: item.querySelector('h3')?.textContent ?? '',
+      description: item.querySelector('.program-guide-description')?.textContent ?? '',
+      audience: item.querySelector('.program-guide-audience')?.textContent ?? '',
+      meta: item.querySelector('.program-meta')?.textContent ?? '',
+      action: item.querySelector('.guide-select-program')?.textContent ?? '',
+    }));
+    const guideSelections = [];
+    for (const expected of ${JSON.stringify(EXPECTED_CATALOG_MATRIX.guide)}) {
+      document.querySelector('#program-guide-list [data-program-id="' + expected.id + '"] .guide-select-program').click();
+      await waitFor(() => document.querySelector('#program-picker')?.value === expected.id,
+        'Guide action did not select ' + expected.id);
+      guideSelections.push(document.querySelector('#program-picker').value);
+    }
+    return {
+      categories: readOptions(document.querySelector('#category-picker')),
+      programOptionsByCategory,
+      programs,
+      guide,
+      guideSelections,
+    };
+  })()`);
+
+  assert.deepEqual(catalogMatrix.categories, EXPECTED_CATALOG_MATRIX.categories);
+  assert.deepEqual(catalogMatrix.programs, EXPECTED_CATALOG_MATRIX.programs);
+  assert.deepEqual(catalogMatrix.guide, EXPECTED_CATALOG_MATRIX.guide);
+  assert.deepEqual(catalogMatrix.guideSelections, EXPECTED_CATALOG_MATRIX.guide.map(({ id }) => id));
+  for (const program of EXPECTED_CATALOG_MATRIX.programs) {
+    assert.deepEqual(catalogMatrix.programOptionsByCategory[program.categoryId], [{ id: program.id, name: program.name }]);
+  }
+
+  const navigationQa = await evaluate(cdp, `(async () => {
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const toggle = document.querySelector('#menu-toggle');
+    const drawer = document.querySelector('#app-drawer');
+    const backdrop = document.querySelector('#menu-backdrop');
+    toggle.focus();
+    toggle.click();
+    await nextFrame();
+    const opened = {
+      expanded: toggle.getAttribute('aria-expanded'),
+      controls: toggle.getAttribute('aria-controls'),
+      drawerVisible: !drawer.hidden,
+      backdropVisible: !backdrop.hidden,
+      mainInert: document.querySelector('main').inert,
+      bodyOverflow: getComputedStyle(document.body).overflow,
+      focusInside: drawer.contains(document.activeElement),
+    };
+    const focusable = [...drawer.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+      .filter((node) => !node.hidden && node.getClientRects().length > 0);
+    focusable.at(-1).focus();
+    drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    const forwardTrap = document.activeElement === focusable[0];
+    focusable[0].focus();
+    drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+    const backwardTrap = document.activeElement === focusable.at(-1);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await nextFrame();
+    const escaped = { hidden: drawer.hidden, expanded: toggle.getAttribute('aria-expanded'), focusReturned: document.activeElement === toggle };
+    toggle.click();
+    await nextFrame();
+    drawer.querySelector('[data-nav-id="guide"]').click();
+    await nextFrame();
+    const selection = {
+      drawerHidden: drawer.hidden,
+      guideVisible: !document.querySelector('#tab-guide').hidden,
+      journalHidden: document.querySelector('#tab-journal').hidden,
+      current: drawer.querySelector('[aria-current="page"]')?.dataset.navId,
+      focused: document.activeElement?.id,
+    };
+    toggle.click();
+    await nextFrame();
+    drawer.querySelector('[data-nav-id="journal"]').click();
+    await nextFrame();
+    return {
+      opened,
+      forwardTrap,
+      backwardTrap,
+      escaped,
+      selection,
+      minTargets: ['#menu-toggle', '#start-workout', '#category-picker', '.day-tab'].map((selector) => ({
+        selector,
+        height: document.querySelector(selector).getBoundingClientRect().height,
+      })),
+      mobileDashboardColumns: getComputedStyle(document.querySelector('.journal-dashboard')).gridTemplateColumns.split(' ').length,
+    };
+  })()`);
+  assert.deepEqual(navigationQa.opened, {
+    expanded: "true",
+    controls: "app-drawer",
+    drawerVisible: true,
+    backdropVisible: true,
+    mainInert: true,
+    bodyOverflow: "hidden",
+    focusInside: true,
+  });
+  assert.equal(navigationQa.forwardTrap, true);
+  assert.equal(navigationQa.backwardTrap, true);
+  assert.deepEqual(navigationQa.escaped, { hidden: true, expanded: "false", focusReturned: true });
+  assert.deepEqual(navigationQa.selection, {
+    drawerHidden: true,
+    guideVisible: true,
+    journalHidden: true,
+    current: "guide",
+    focused: "guide-title",
+  });
+  assert.equal(navigationQa.minTargets.every(({ height }) => height >= 44), true);
+  assert.equal(navigationQa.mobileDashboardColumns, 1);
+  const mobileDashboardScreenshot = await captureScreenshot(cdp, "dashboard-390x844.png");
+  await evaluate(cdp, "document.querySelector('#menu-toggle').click()");
+  await delay(100);
+  const mobileDrawerScreenshot = await captureScreenshot(cdp, "drawer-390x844.png");
+  await evaluate(cdp, "document.querySelector('#menu-close').click()");
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  const desktopQa = await evaluate(cdp, `(async () => {
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const toggle = document.querySelector('#menu-toggle');
+    const drawer = document.querySelector('#app-drawer');
+    toggle.focus();
+    toggle.click();
+    await nextFrame();
+    const focusable = [...drawer.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+      .filter((node) => !node.hidden && node.getClientRects().length > 0);
+    focusable.at(-1).focus();
+    drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    const forwardTrap = document.activeElement === focusable[0];
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await nextFrame();
+    return {
+      viewport: [innerWidth, innerHeight],
+      menuVisible: getComputedStyle(toggle).display !== 'none',
+      menuHeight: toggle.getBoundingClientRect().height,
+      dashboardColumns: getComputedStyle(document.querySelector('.journal-dashboard')).gridTemplateColumns.split(' ').length,
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      forwardTrap,
+      escapeClosed: drawer.hidden,
+      focusReturned: document.activeElement === toggle,
+    };
+  })()`);
+  assert.deepEqual(desktopQa.viewport, [1440, 900]);
+  assert.equal(desktopQa.menuVisible, true);
+  assert.ok(desktopQa.menuHeight >= 44);
+  assert.equal(desktopQa.dashboardColumns, 2);
+  assert.equal(desktopQa.horizontalOverflow, false);
+  assert.equal(desktopQa.forwardTrap, true);
+  assert.equal(desktopQa.escapeClosed, true);
+  assert.equal(desktopQa.focusReturned, true);
+  const desktopDashboardScreenshot = await captureScreenshot(cdp, "dashboard-1440x900.png");
+  await evaluate(cdp, "document.querySelector('#menu-toggle').click()");
+  await delay(100);
+  const desktopDrawerScreenshot = await captureScreenshot(cdp, "drawer-1440x900.png");
+  await evaluate(cdp, "document.querySelector('#menu-close').click()");
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
 
   const migration = await evaluate(cdp, `(async () => {
     const waitFor = async (check, message) => {
@@ -310,10 +606,10 @@ try {
     await waitFor(() => document.querySelector('#save-status').textContent === 'Збережено', 'Set was not saved');
     document.querySelector('#finish-workout').click();
     await waitFor(() => !document.querySelector('#start-workout').disabled, 'Workout was not completed');
-    document.querySelector('label[for="nav-history"]').click();
+    document.querySelector('.drawer-link[data-nav-id="history"]').click();
     await waitFor(() => document.querySelectorAll('.history-item').length >= 2, 'Migrated and completed workouts missing from history');
     const historyText = document.querySelector('#history-list').textContent;
-    document.querySelector('label[for="nav-journal"]').click();
+    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
 
     const dateControl = document.querySelector('#workout-date');
     dateControl.focus();
@@ -375,7 +671,7 @@ try {
 
     await startNextWorkout('Fourth athlete workout did not start');
     const stableAtSixty = document.querySelector(slotSelector + ' .stable-result').textContent;
-    document.querySelector('label[for="nav-history"]').click();
+    document.querySelector('.drawer-link[data-nav-id="history"]').click();
     const beforeDeleteCount = document.querySelectorAll('#history-list .history-item').length;
 
     const readDatabase = () => new Promise((resolve, reject) => {
@@ -412,7 +708,7 @@ try {
       getAll(afterDeleteTx.objectStore('entries')),
     ]);
     afterDeleteDb.close();
-    document.querySelector('label[for="nav-journal"]').click();
+    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
     const stableAfterDelete = document.querySelector(slotSelector + ' .stable-result').textContent;
     return {
       forms: document.querySelectorAll('.exercise-log').length,
@@ -544,7 +840,7 @@ try {
       throw new Error(message);
     };
     await waitFor(() => document.querySelector('#account-login') && !document.querySelector('#account-login').disabled, 'Configured account UI did not boot');
-    document.querySelector('label[for="nav-history"]').click();
+    document.querySelector('.drawer-link[data-nav-id="history"]').click();
     const guestCount = document.querySelectorAll('#history-list .history-item').length;
     document.querySelector('#account-email').value = 'a@example.com';
     document.querySelector('#account-password').value = 'password';
@@ -616,7 +912,14 @@ try {
   assert.ok(accountResult.dbNames.includes('workout-program-user-11111111-1111-4111-8111-111111111111'));
   assert.ok(accountResult.dbNames.includes('workout-program-user-22222222-2222-4222-8222-222222222222'));
   assert.deepEqual(cdp.exceptions, []);
-  console.log(`PASS browser smoke: ${JSON.stringify({ guest: result, account: accountResult })}`);
+  assert.deepEqual(cdp.consoleErrors, []);
+  assert.deepEqual(cdp.logErrors, []);
+  assert.deepEqual(cdp.httpErrors, []);
+  console.log(`PASS browser smoke: ${JSON.stringify({
+    guest: result,
+    account: accountResult,
+    screenshots: [mobileDashboardScreenshot, mobileDrawerScreenshot, desktopDashboardScreenshot, desktopDrawerScreenshot],
+  })}`);
   cdp.socket.close();
 } finally {
   await new Promise((resolve) => server.close(resolve));

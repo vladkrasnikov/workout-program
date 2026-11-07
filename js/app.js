@@ -21,6 +21,10 @@ import {
 } from "./cloud-sync.js";
 
 const CLOUD_SCOPE_HINT_KEY = "workout-program:account-scope";
+const SECTION_IDS = ["journal", "history", "guide"];
+let activeSectionId = "journal";
+let activeNavigationId = "journal";
+let drawerReturnFocus = null;
 
 const state = {
   active: null,
@@ -336,18 +340,85 @@ function selectProgram(programId, dayId = null) {
   state.selectedDayId = getDay(program.id, dayId)?.id ?? program.days[0].id;
 }
 
-function showMainTab(id) {
-  const radio = byId(`nav-${id}`);
-  if (radio) radio.checked = true;
-  updateTabAria();
+function updateNavigationState() {
+  document.querySelectorAll(".drawer-link[data-nav-id]").forEach((button) => {
+    if (button.dataset.navId === activeNavigationId) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
 }
 
-function updateTabAria() {
-  document.querySelectorAll('.bottom-nav label[role="tab"][for]').forEach((label) => {
-    const selected = Boolean(byId(label.htmlFor)?.checked);
-    label.setAttribute("aria-selected", String(selected));
-    label.tabIndex = selected ? 0 : -1;
-  });
+function setBackgroundInert(inert) {
+  const main = document.querySelector("main");
+  const brand = document.querySelector(".brand-block");
+  const headerActions = document.querySelector(".header-actions");
+  if (main) main.inert = inert;
+  if (brand) brand.inert = inert;
+  if (headerActions) headerActions.inert = inert;
+}
+
+function closeMenu({ restoreFocus = true } = {}) {
+  const drawer = byId("app-drawer");
+  const backdrop = byId("menu-backdrop");
+  const toggle = byId("menu-toggle");
+  if (!drawer || drawer.hidden) return;
+  drawer.hidden = true;
+  backdrop.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-label", "Відкрити меню");
+  document.body.classList.remove("menu-open");
+  setBackgroundInert(false);
+  if (restoreFocus) (drawerReturnFocus?.isConnected ? drawerReturnFocus : toggle).focus();
+  drawerReturnFocus = null;
+}
+
+function openMenu() {
+  const drawer = byId("app-drawer");
+  const backdrop = byId("menu-backdrop");
+  const toggle = byId("menu-toggle");
+  if (!drawer || !drawer.hidden) return;
+  drawerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : toggle;
+  drawer.hidden = false;
+  backdrop.hidden = false;
+  toggle.setAttribute("aria-expanded", "true");
+  toggle.setAttribute("aria-label", "Закрити меню");
+  document.body.classList.add("menu-open");
+  setBackgroundInert(true);
+  requestAnimationFrame(() => (
+    drawer.querySelector('[aria-current="page"]')
+    || drawer.querySelector("button:not([disabled])")
+  )?.focus());
+}
+
+function showSection(id, { focus = false, focusTarget = null, navigationId = id } = {}) {
+  if (!SECTION_IDS.includes(id)) return;
+  activeSectionId = id;
+  activeNavigationId = navigationId;
+  for (const sectionId of SECTION_IDS) {
+    const section = byId(`tab-${sectionId}`);
+    if (section) section.hidden = sectionId !== id;
+  }
+  updateNavigationState();
+  if (focus) {
+    const target = focusTarget ? byId(focusTarget) : byId(`${id}-title`);
+    requestAnimationFrame(() => target?.focus());
+  }
+}
+
+function trapDrawerFocus(event) {
+  if (event.key !== "Tab") return;
+  const drawer = byId("app-drawer");
+  const focusable = [...drawer.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+    .filter((node) => !node.hidden && node.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function performedAtForDate(date) {
@@ -617,7 +688,7 @@ function renderMovement(entry, movement) {
   });
   const history = element("button", { className: "action-btn action-secondary", text: "Прогрес", type: "button" });
   history.addEventListener("click", () => {
-    showMainTab("history");
+    showSection("history");
     renderExerciseHistory(byId("history-detail"), entry, state.sessions, state.entries);
     byId("history-detail").scrollIntoView({ behavior: "smooth", block: "start" });
   });
@@ -681,6 +752,18 @@ function renderExerciseCard(card, index) {
   return details;
 }
 
+function formatDurationMinutes(duration) {
+  if (Number.isFinite(duration)) return `близько ${duration} хв`;
+  if (duration && Number.isFinite(duration.min) && Number.isFinite(duration.max)) {
+    return duration.min === duration.max ? `${duration.min} хв` : `${duration.min}–${duration.max} хв`;
+  }
+  return "тривалість залежить від темпу";
+}
+
+function formatProgramFrequency(program) {
+  return `${program.frequency.sessionsPerWeek}× на тиждень · ${formatDurationMinutes(program.frequency.durationMinutes)}`;
+}
+
 function renderProgramPickers() {
   const program = currentProgram();
   const categorySelect = byId("category-picker");
@@ -703,10 +786,10 @@ function renderProgramPickers() {
   programSelect.disabled = Boolean(state.active);
   const summary = byId("program-summary");
   summary.replaceChildren(
-    element("strong", { text: program.name }),
+    element("strong", { className: "program-title", text: program.name }),
     element("p", { text: program.description }),
-    element("p", { text: `Для кого: ${program.audience}` }),
-    element("span", { className: "program-meta", text: `${program.frequency.sessionsPerWeek}× на тиждень · близько ${program.frequency.durationMinutes} хв` }),
+    element("p", { className: "program-audience", text: `Для кого: ${program.audience}` }),
+    element("span", { className: "program-meta", text: formatProgramFrequency(program) }),
   );
 }
 
@@ -828,7 +911,7 @@ const historyHandlers = {
       await putSetting("currentProgramId", updated.programId);
       state.active = { session: updated, entries: await listEntriesForSession(updated.id) };
       selectProgram(updated.programId, updated.dayId);
-      showMainTab("journal");
+      showSection("journal");
       byId("history-detail").hidden = true;
       await refreshData();
       renderJournal();
@@ -896,10 +979,29 @@ function renderProgramGuide() {
   if (!host) return;
   host.replaceChildren(...PROGRAM_LIST.map((program) => {
     const item = element("article", { className: "program-guide-item" });
+    item.dataset.programId = program.id;
+    const action = element("button", { className: "action-btn action-secondary guide-select-program", text: "Обрати програму", type: "button" });
+    action.dataset.programId = program.id;
+    action.addEventListener("click", async () => {
+      if (state.active) {
+        showSection("journal", { focus: true, focusTarget: "active-session-summary" });
+        setStatus("Заверши поточне тренування, перш ніж змінювати програму", true);
+        return;
+      }
+      try {
+        selectProgram(program.id);
+        await putSetting("currentProgramId", program.id);
+        renderJournal();
+        showSection("journal", { focus: true, focusTarget: "program-summary" });
+        setStatus(`Обрано програму: ${program.name}`);
+      } catch (error) { reportError(error); }
+    });
     item.append(
       element("h3", { text: program.name }),
-      element("p", { text: program.audience }),
-      element("span", { className: "program-meta", text: `${program.frequency.sessionsPerWeek}×/тиждень · ${program.frequency.durationMinutes} хв · ${program.days.length} типи тренувань` }),
+      element("p", { className: "program-guide-description", text: program.description }),
+      element("p", { className: "program-guide-audience", text: `Для кого: ${program.audience}` }),
+      element("span", { className: "program-meta", text: `${formatProgramFrequency(program)} · ${program.days.length} типи тренувань` }),
+      action,
     );
     return item;
   }));
@@ -1000,7 +1102,7 @@ function wireControls() {
   byId("start-workout").addEventListener("click", () => beginWorkout());
   byId("finish-workout").addEventListener("click", completeWorkout);
   byId("add-past-workout").addEventListener("click", () => {
-    showMainTab("journal");
+    showSection("journal");
     setStatus("Обери програму, день і дату, потім почни тренування");
     byId("workout-date").focus();
   });
@@ -1014,23 +1116,30 @@ function wireControls() {
   byId("transfer-guest-history").addEventListener("click", transferGuestHistory);
   byId("sync-use-local").addEventListener("click", () => resolveSyncConflict("local"));
   byId("sync-use-cloud").addEventListener("click", () => resolveSyncConflict("cloud"));
-  document.querySelectorAll('input[name="main-nav"]').forEach((radio) => radio.addEventListener("change", updateTabAria));
-  document.querySelectorAll('.bottom-nav label[role="tab"]').forEach((label) => {
-    label.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        label.click();
-        return;
-      }
-      if (["ArrowLeft", "ArrowRight"].includes(event.key)) {
-        event.preventDefault();
-        const tabs = [...document.querySelectorAll('.bottom-nav label[role="tab"]')];
-        const direction = event.key === "ArrowRight" ? 1 : -1;
-        const next = tabs[(tabs.indexOf(label) + direction + tabs.length) % tabs.length];
-        next.click();
-        next.focus();
-      }
+  byId("menu-toggle").addEventListener("click", () => {
+    if (byId("app-drawer").hidden) openMenu();
+    else closeMenu();
+  });
+  byId("menu-close").addEventListener("click", () => closeMenu());
+  byId("menu-backdrop").addEventListener("click", () => closeMenu());
+  byId("app-drawer").addEventListener("keydown", trapDrawerFocus);
+  document.querySelectorAll(".drawer-link[data-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionId = button.dataset.section;
+      const focusTarget = button.dataset.focusTarget || null;
+      closeMenu({ restoreFocus: false });
+      showSection(sectionId, {
+        focus: true,
+        focusTarget,
+        navigationId: button.dataset.navId || sectionId,
+      });
     });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !byId("app-drawer").hidden) {
+      event.preventDefault();
+      closeMenu();
+    }
   });
 }
 
@@ -1078,7 +1187,7 @@ async function boot() {
     byId("workout-date").value = localDateString();
     wireControls();
     renderProgramGuide();
-    updateTabAria();
+    showSection(activeSectionId);
     updateConnectionStatus();
     selectProgram(DEFAULT_PROGRAM_ID);
     renderJournal();
