@@ -38,9 +38,10 @@ test("PWA shell is version-consistent and exposes its build to the boot gate", a
   assert.match(html, /<noscript>/);
 });
 
-test("default cloud config is guest-safe and contains no service role credential", async () => {
+test("browser cloud config contains only public credentials", async () => {
   const source = await readFile(resolve(root, "js/cloud-config.js"), "utf8");
-  assert.match(source, /supabaseUrl:\s*""/);
-  assert.match(source, /supabasePublishableKey:\s*""/);
+  assert.match(source, /supabaseUrl:\s*"https:\/\/[^\"]+"/);
+  assert.match(source, /supabasePublishableKey:\s*"sb_publishable_[^\"]+"/);
+  assert.doesNotMatch(source, /sb_secret_/);
   assert.doesNotMatch(source, /service_role\s*:/i);
 });

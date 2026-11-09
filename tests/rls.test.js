@@ -8,9 +8,9 @@ test("Supabase schema enables RLS and defines owner-only CRUD policies", async (
   const sql = (await readFile(sqlPath, "utf8")).toLowerCase().replace(/\s+/g, " ");
   assert.match(sql, /alter table public\.workout_snapshots enable row level security/);
   for (const operation of ["select", "insert", "update", "delete"]) {
-    assert.match(sql, new RegExp(`create policy [\\s\\S]*? for ${operation}`));
+    assert.match(sql, new RegExp(`create policy [\\s\\S]*? for ${operation} to authenticated`));
   }
-  const ownerGuard = /auth\.uid\(\) is not null and auth\.uid\(\) = user_id/g;
+  const ownerGuard = /\(select auth\.uid\(\)\) = user_id/g;
   assert.ok((sql.match(ownerGuard) ?? []).length >= 5, "each USING/WITH CHECK must explicitly require an authenticated owner");
   assert.doesNotMatch(sql, /service_role/);
 });

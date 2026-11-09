@@ -56,6 +56,12 @@ function makeServer() {
     try {
       const url = new URL(request.url, `http://${HOST}`);
       const pathname = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+      // Keep no-cloud coverage deterministic even when production is configured.
+      if (pathname === '/js/cloud-config.js') {
+        response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+        response.end('export default {supabaseUrl:"",supabasePublishableKey:""};');
+        return;
+      }
       const relative = normalize(pathname).replace(/^[/\\]+/, "");
       const filename = join(ROOT, relative);
       if (!filename.startsWith(ROOT)) throw new Error("Invalid path");
@@ -239,14 +245,14 @@ try {
   })()`);
   assert.equal(noConfig.categories, 5);
   assert.equal(noConfig.guidePrograms, 5);
-  assert.equal(noConfig.startDisabled, true);
+  assert.equal(noConfig.startDisabled, false);
   assert.equal(noConfig.addPastDisabled, true);
   assert.equal(noConfig.exportDisabled, true);
   assert.equal(noConfig.importDisabled, true);
   assert.equal(noConfig.historyCount, 0, "Legacy anonymous data must not be exposed as personal history");
   assert.equal(noConfig.loginDisabled, true);
   assert.doesNotMatch(noConfig.account, /гостьов/i);
-  assert.match(`${noConfig.account} ${noConfig.status}`, /налашт|адміністратор|Supabase/i);
+  assert.match(`${noConfig.account} ${noConfig.status}`, /локально|без акаунта/i);
 
   const remoteA = completedSession("remote-a-session", "Cloud A — authoritative", "2026-02-20");
   await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `
@@ -350,7 +356,7 @@ try {
     };
   })()`);
   assert.equal(configuredUnauth.historyCount, 0);
-  assert.equal(configuredUnauth.startDisabled, true);
+  assert.equal(configuredUnauth.startDisabled, false);
   assert.equal(configuredUnauth.addPastDisabled, true);
   assert.equal(configuredUnauth.exportDisabled, true);
   assert.equal(configuredUnauth.importDisabled, true);
@@ -429,7 +435,7 @@ try {
   assert.equal(account.writesAfterRepeatedImport, account.writesAfterImport, "Legacy import must be idempotent");
   assert.deepEqual(account.importedSessions, ["legacy-local-session", "remote-a-session"]);
   assert.equal(account.markerCount, 1);
-  assert.deepEqual(account.hiddenAfterLogout, { history: 0, startDisabled: true, legacyVisible: false });
+  assert.deepEqual(account.hiddenAfterLogout, { history: 0, startDisabled: false, legacyVisible: false });
   assert.deepEqual(account.bInitial, { history: 0, remoteSessions: 0 });
 
   await cdp.send("Network.emulateNetworkConditions", {
@@ -516,6 +522,45 @@ try {
   assert.deepEqual(reconnect.aRemoteSessions, ["legacy-local-session", "remote-a-session"]);
   assert.deepEqual(reconnect.bRemoteSessionsAfterDelete, []);
   assert.ok(!reconnect.aRemoteSessions.includes(reconnect.bWorkoutId), "Account B data leaked into A");
+
+  const localIsolation = await evaluate(cdp, `(async () => {
+    const waitFor = async (check, message) => {
+      for (let i = 0; i < 160; i++) {
+        if (await check()) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(message);
+    };
+    window.confirm = () => true;
+    document.querySelector('#account-logout').click();
+    await waitFor(() => !document.querySelector('#account-summary').textContent.includes('a@example.com'), 'Logout before local mode failed');
+    document.querySelector('#enable-local-mode').click();
+    await waitFor(() => /Локальний режим/.test(document.querySelector('#account-summary').textContent), 'Local mode not enabled with cloud configured');
+    const storage = await import('./js/storage.js');
+    const initial = await storage.exportAllData();
+    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
+    document.querySelector('#start-workout').click();
+    await waitFor(() => !document.querySelector('#finish-workout').disabled, 'Local draft did not start');
+    const local = await storage.exportAllData();
+    const draft = local.sessions.find(item => !initial.sessions.some(old => old.id === item.id));
+    const writes = window.__mockAccountCloud.writes;
+    document.querySelector('.drawer-link[data-nav-id="account"]').click();
+    document.querySelector('#account-email').value = 'a@example.com';
+    document.querySelector('#account-password').value = 'password';
+    document.querySelector('#account-login').click();
+    await waitFor(() => document.querySelector('#account-summary').textContent.includes('a@example.com'), 'Login from local mode failed');
+    const cloudIds = (await storage.exportAllData()).sessions.map(item => item.id);
+    document.querySelector('#account-logout').click();
+    await waitFor(() => /Локальний режим/.test(document.querySelector('#account-summary').textContent), 'Logout did not restore local mode');
+    const restored = await storage.exportAllData();
+    return { draftId: draft.id, cloudIds, restoredIds: restored.sessions.map(item => item.id),
+      writableDraft: !document.querySelector('#finish-workout').disabled,
+      writesBefore: writes, writesAfter: window.__mockAccountCloud.writes };
+  })()`);
+  assert.ok(!localIsolation.cloudIds.includes(localIsolation.draftId));
+  assert.ok(localIsolation.restoredIds.includes(localIsolation.draftId));
+  assert.equal(localIsolation.writableDraft, true);
+  assert.equal(localIsolation.writesAfter, localIsolation.writesBefore, 'Local workout must never auto-upload on login');
   assert.deepEqual(cdp.errors, []);
 
   console.log(`PASS account access smoke: ${JSON.stringify({ noConfig, configuredUnauth, account, reconnect })}`);

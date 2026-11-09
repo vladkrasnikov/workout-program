@@ -109,6 +109,12 @@ function makeServer() {
         return;
       }
 
+      if (relative === 'js/cloud-config.js') {
+        response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+        response.end('export default {supabaseUrl:"",supabasePublishableKey:""};');
+        return;
+      }
+
       const safeRelative = normalize(relative).replace(/^[/\\]+/, "");
       const filename = join(ROOT, safeRelative);
       if (!filename.startsWith(ROOT)) throw new Error("Invalid path");
@@ -256,7 +262,7 @@ try {
     await waitFor(cdp, "document.querySelector('#category-picker')?.options.length === 5 && document.querySelectorAll('#program-guide-list .program-guide-item').length === 5", "Catalog did not recover after atomic update");
   } catch (error) {
     const state = await evaluate(cdp, `(async () => {
-      const versionCache = await caches.open('workout-program-shell-v7');
+      const versionCache = await caches.open('workout-program-shell-v8');
       return {
         href: location.href,
         controller: navigator.serviceWorker.controller?.scriptURL,
@@ -292,7 +298,7 @@ try {
   assert.equal(recovered.diagnosticHidden, true);
   assert.deepEqual(controllerInfo, {
     type: "BUILD_VERSION",
-    build: "v7",
+    build: "v8",
     shellPolicy: "cache-only",
     baseUrl: `${origin}/fixed/`,
   });
@@ -322,8 +328,8 @@ try {
     downloadThroughput: -1,
     uploadThroughput: -1,
   });
-  const deletedShellModule = await evaluate(cdp, `caches.open('workout-program-shell-v7').then((cache) => cache.delete(new URL('./js/app.js', location.href)))`);
-  assert.equal(deletedShellModule, true, "Test must remove the cached v7 app module");
+  const deletedShellModule = await evaluate(cdp, `caches.open('workout-program-shell-v8').then((cache) => cache.delete(new URL('./js/app.js', location.href)))`);
+  assert.equal(deletedShellModule, true, "Test must remove the cached v8 app module");
   modes.set("fixed", "incompatible");
   await cdp.send("Page.reload");
   await waitFor(cdp, "!document.querySelector('#boot-diagnostic')?.hidden && /модулі застосунку/i.test(document.querySelector('#boot-diagnostic-message')?.textContent)", "Corrupted shell did not stop at a visible diagnostic");
@@ -333,7 +339,7 @@ try {
     categories: document.querySelector('#category-picker').options.length,
   })`);
   const incompatibleModuleRan = await evaluate(cdp, "globalThis.__INCOMPATIBLE_FUTURE_APP_RAN__ === true");
-  assert.equal(incompatibleModuleRan, false, "Missing v7 shell module must never execute the future network asset");
+  assert.equal(incompatibleModuleRan, false, "Missing v8 shell module must never execute the future network asset");
   assert.match(corruptedShell.message, /не вдалося завантажити модулі/i);
   assert.equal(corruptedShell.action, "Спробувати ще раз");
   assert.equal(corruptedShell.categories, 0);

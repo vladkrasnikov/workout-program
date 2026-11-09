@@ -11,7 +11,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/styles.css">
-  <meta name="workout-app-build" content="v7">
+  <meta name="workout-app-build" content="v8">
   <script>
     (() => {
       const build = document.querySelector('meta[name="workout-app-build"]').content;
@@ -162,7 +162,7 @@
       <button class="drawer-link" type="button" data-section="guide" data-nav-id="guide" aria-controls="tab-guide">База знань</button>
       <button class="drawer-link drawer-link-account" type="button" data-section="account" data-nav-id="account" aria-controls="tab-account">Акаунт і синхронізація</button>
     </nav>
-    <p class="drawer-note">Каталог доступний усім. Історія та прогрес зберігаються у вашому Supabase-акаунті.</p>
+    <p class="drawer-note">Тренуйтеся з акаунтом і хмарною синхронізацією або без акаунта зі збереженням у цьому браузері.</p>
   </aside>
 
   <main>
@@ -199,7 +199,7 @@
             <button id="start-workout" class="action-btn action-primary" type="button">Почати тренування</button>
             <button id="finish-workout" class="action-btn action-success" type="button" disabled>Завершити</button>
           </div>
-          <p id="session-access-hint" class="session-hint">Увійдіть, щоб записувати підходи та зберігати прогрес у хмарі.</p>
+          <p id="session-access-hint" class="session-hint">Увійдіть або оберіть тренування без акаунта.</p>
         </section>
       </div>
 
@@ -213,9 +213,9 @@
 
     <section id="tab-history" class="main-tab" aria-labelledby="history-title" hidden>
       <section id="history-locked" class="card access-card" aria-labelledby="history-locked-title">
-        <h2 id="history-locked-title">Історія доступна після входу</h2>
-        <p>Увійдіть або зареєструйтеся, щоб бачити лише власні тренування й прогрес.</p>
-        <button class="action-btn action-primary open-account" type="button">Увійти або зареєструватися</button>
+        <h2 id="history-locked-title">Обери спосіб збереження історії</h2>
+        <p>Зберігай прогрес у хмарі з акаунтом або локально в цьому браузері без акаунта.</p>
+        <button class="action-btn action-primary open-account" type="button">Обрати спосіб збереження</button>
       </section>
       <div id="personal-history-content" hidden>
       <div class="card">
@@ -237,7 +237,11 @@
           <button id="account-logout" class="action-btn action-secondary" type="button" hidden>Вийти</button>
         </div>
         <div id="cloud-setup-message" class="setup-message" role="status" hidden>
-          Supabase не налаштовано. Каталог працює у режимі читання; адміністратору потрібно заповнити <code>js/cloud-config.js</code>.
+          Хмарна синхронізація поки недоступна. Тренування, історія та резервні копії доступні локально без акаунта.
+        </div>
+        <div id="local-mode-options" class="setup-message">
+          <p>Без акаунта історія зберігається лише в цьому браузері. Очищення даних браузера може видалити її; на іншому пристрої або в іншому акаунті вона не з’явиться автоматично. Для перенесення та відновлення використовуй JSON.</p>
+          <button id="enable-local-mode" class="action-btn action-secondary" type="button">Тренуватися без акаунта</button>
         </div>
         <form id="account-form" class="account-form">
           <label class="field-label" for="account-email">Email<input id="account-email" type="email" autocomplete="email" required></label>
@@ -264,7 +268,7 @@
       </section>
       <section id="backup-tools" class="card backup-card" aria-labelledby="backup-title" hidden>
         <h2 id="backup-title">Резервна копія</h2>
-        <p>JSON — ручна резервна копія даних поточного акаунта. Імпорт одразу синхронізується з Supabase.</p>
+        <p>JSON — резервна копія поточної історії. Без акаунта імпорт зберігається в цьому браузері; з акаунтом — також синхронізується з хмарою.</p>
         <div class="backup-actions">
           <button id="export-backup" class="action-btn action-primary" type="button">Експортувати JSON</button>
           <label class="action-btn action-secondary file-action" for="import-backup">Імпортувати JSON</label>

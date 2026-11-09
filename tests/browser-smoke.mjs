@@ -40,6 +40,12 @@ function makeStaticServer() {
     try {
       const url = new URL(request.url, `http://${HOST}`);
       const pathname = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+      // Keep no-cloud coverage deterministic even when production is configured.
+      if (pathname === '/js/cloud-config.js') {
+        response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+        response.end('export default {supabaseUrl:"",supabasePublishableKey:""};');
+        return;
+      }
       const relative = normalize(pathname).replace(/^[/\\]+/, "");
       const filename = join(ROOT, relative);
       if (!filename.startsWith(ROOT)) throw new Error("Invalid path");
@@ -515,7 +521,7 @@ try {
       throw new Error(message);
     };
     await waitFor(() => document.querySelector('#category-picker')?.options.length === 5
-      && document.querySelector('#start-workout')?.disabled
+      && !document.querySelector('#start-workout')?.disabled
       && !document.querySelector('#history-locked')?.hidden,
     'Read-only catalog did not finish booting');
 
@@ -616,8 +622,8 @@ try {
   assert.equal(readOnlyState.before.sessions, 1);
   assert.equal(readOnlyState.before.entries, 1);
   assert.deepEqual(readOnlyState.after, readOnlyState.before);
-  assert.equal(readOnlyState.startDisabled, true);
-  assert.match(readOnlyState.startText, /вхід/i);
+  assert.equal(readOnlyState.startDisabled, false);
+  assert.match(readOnlyState.startText, /збереження/i);
   assert.equal(readOnlyState.dateDisabled, true);
   assert.equal(readOnlyState.finishDisabled, true);
   assert.match(readOnlyState.sessionHint, /увійдіть/i);
@@ -631,9 +637,9 @@ try {
   });
   assert.equal(readOnlyState.accountState.currentNavigation, 'account');
   assert.equal(readOnlyState.accountState.setupVisible, true);
-  assert.match(readOnlyState.accountState.setupText, /Supabase/i);
-  assert.match(readOnlyState.accountState.summary, /запис тренувань вимкнено/i);
-  assert.match(readOnlyState.accountState.cloudStatus, /каталог/i);
+  assert.match(readOnlyState.accountState.setupText, /локально/i);
+  assert.match(readOnlyState.accountState.summary, /без акаунта/i);
+  assert.match(readOnlyState.accountState.cloudStatus, /без акаунта/i);
   assert.equal(readOnlyState.accountState.formDisabled, true);
   assert.equal(readOnlyState.accountState.importLegacyHidden, true);
   assert.equal(readOnlyState.accountState.backupHidden, true);
@@ -653,7 +659,7 @@ try {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if (document.querySelector('#category-picker')?.options.length === 5
         && document.querySelectorAll('#program-guide-list .program-guide-item').length === 5
-        && document.querySelector('#start-workout')?.disabled) break;
+        && !document.querySelector('#start-workout')?.disabled) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const database = await new Promise((resolve, reject) => {
@@ -682,12 +688,79 @@ try {
   assert.deepEqual(reloadState, {
     categories: 5,
     guideItems: 5,
-    startDisabled: true,
+    startDisabled: false,
     historyLocked: true,
     personalHistoryHidden: true,
     sessions: 1,
     entries: 1,
   });
+
+  const localWorkout = await evaluate(cdp, `(async () => {
+    const waitFor = async (check, label) => {
+      for (let i = 0; i < 120; i++) {
+        if (await check()) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(label);
+    };
+    document.querySelector('.drawer-link[data-nav-id="account"]').click();
+    let warning = '';
+    window.confirm = text => { warning = text; return false; };
+    document.querySelector('#enable-local-mode').click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (localStorage.getItem('workout-program:local-consent-v1')) throw new Error('Declining consent enabled local storage');
+    if (!document.querySelector('#personal-history-content').hidden) throw new Error('History exposed without consent');
+    window.confirm = () => true;
+    document.querySelector('#enable-local-mode').click();
+    await waitFor(() => !document.querySelector('#backup-tools').hidden, 'Local mode not enabled');
+    const storage = await import('./js/storage.js');
+    const initial = await storage.exportAllData();
+    document.querySelector('.drawer-link[data-nav-id="journal"]').click();
+    document.querySelector('#start-workout').click();
+    await waitFor(() => !document.querySelector('#finish-workout').disabled, 'Local workout did not start');
+    const first = document.querySelector('.exercise-log');
+    const load = first.querySelector('input[aria-label="Вага, кг"]');
+    const reps = first.querySelector('input[aria-label="Повтори"]');
+    for (const [input, value] of [[load, '42'], [reps, '8']]) {
+      if (!input) throw new Error('Working set input missing');
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    first.querySelector('input[type="checkbox"]').click();
+    document.querySelector('#finish-workout').click();
+    await waitFor(() => /збережено локально/i.test(document.querySelector('#save-status').textContent), 'Local workout not completed');
+    const snapshot = await storage.exportAllData();
+    const session = snapshot.sessions.find(item => !initial.sessions.some(old => old.id === item.id));
+    const entry = snapshot.entries.find(item => item.sessionId === session?.id && item.sets.some(set => set.confirmed));
+    const backup = await (await import('./js/backup.js')).createBackup();
+    if (!backup.sessions.some(item => item.id === session.id)) throw new Error('Local backup omitted workout');
+    window.__localWorkoutId = session.id;
+    return { warning, initialCount: initial.sessions.length, count: snapshot.sessions.length,
+      id: session.id, status: session.status, set: entry?.sets.find(set => set.confirmed),
+      hint: document.querySelector('#session-access-hint').textContent };
+  })()`);
+  assert.match(localWorkout.warning, /лише в цьому браузері/);
+  assert.equal(localWorkout.count, localWorkout.initialCount + 1);
+  assert.equal(localWorkout.status, 'completed');
+  assert.equal(localWorkout.set.loadKg, 42);
+  assert.equal(localWorkout.set.reps, 8);
+  assert.match(localWorkout.hint, /Без акаунта/);
+  await cdp.send("Page.reload", { ignoreCache: true });
+  await delay(300);
+  const localReload = await evaluate(cdp, `(async () => {
+    for (let i = 0; i < 100 && document.querySelector('#backup-tools').hidden; i++) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const snapshot = await (await import('./js/storage.js')).exportAllData();
+    return { writable: !document.querySelector('#start-workout').disabled,
+      backup: !document.querySelector('#backup-tools').hidden,
+      sessions: snapshot.sessions.map(item => item.id),
+      history: document.querySelectorAll('#history-list .history-item').length };
+  })()`);
+  assert.equal(localReload.writable, true);
+  assert.equal(localReload.backup, true);
+  assert.ok(localReload.sessions.includes(localWorkout.id));
+  assert.equal(localReload.history, localWorkout.count);
 
   assert.deepEqual(cdp.exceptions, []);
   assert.deepEqual(cdp.consoleErrors, []);

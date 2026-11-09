@@ -54,6 +54,12 @@ jobs:
           cp index.html manifest.webmanifest sw.js _site/
           cp -R assets icons js _site/
           touch _site/.nojekyll
+      - name: Configure public Supabase connection
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_REDIRECT_URL: ${{ vars.SUPABASE_REDIRECT_URL }}
+        run: node scripts/configure-cloud.mjs _site/js/cloud-config.js _site
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
