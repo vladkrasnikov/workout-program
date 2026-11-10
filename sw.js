@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "workout-program-shell-";
-const CACHE_VERSION = "v8";
+const CACHE_VERSION = "v9";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 const BASE_URL = new URL("./", self.location.href);
 const INDEX_URL = new URL("./index.html", BASE_URL).href;
@@ -17,6 +17,7 @@ const APP_SHELL = [
   "./js/auth.js",
   "./js/cloud-config.js",
   "./js/cloud-sync.js",
+  "./js/sync-records.js",
   "./js/program.js",
   "./js/storage.js",
   "./js/workouts.js",

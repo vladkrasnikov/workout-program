@@ -206,23 +206,27 @@ export async function startSession(programId, dayId, options = {}) {
     programId = DEFAULT_PROGRAM_ID;
   }
   const draft = createSessionDraft(programId, dayId, options);
-  const saved = await storage.saveSessionBundle(draft.session, draft.entries, { sessionRevision: 0, entryRevisions: Object.fromEntries(draft.entries.map((entry) => [entry.id, 0])) });
-  await storage.putSetting("activeSessionId", saved.session.id);
-  await storage.putSetting("currentProgramId", saved.session.programId);
+  const saved = await storage.saveSessionBundle(draft.session, draft.entries, { sessionRevision: 0, entryRevisions: Object.fromEntries(draft.entries.map((entry) => [entry.id, 0])),
+    settings: [{ key: "activeSessionId", value: draft.session.id }, { key: "currentProgramId", value: draft.session.programId }] });
   return saved;
 }
 
 export async function getActiveSession() {
-  const id = await storage.getSetting("activeSessionId");
-  if (!id) return null;
-  const session = await storage.getSession(id);
-  if (!session || session.status !== "draft") return null;
+  let id = await storage.getSetting("activeSessionId");
+  let session = id ? await storage.getSession(id) : null;
+  if (!session || session.status !== "draft") {
+    session = (await storage.listSessions()).filter((item) => item.status === "draft")
+      .sort((a, b) => b.performedAt.localeCompare(a.performedAt) || b.id.localeCompare(a.id))[0];
+    if (!session) return null;
+    id = session.id;
+    await storage.putSetting("activeSessionId", id);
+  }
   return { session, entries: await storage.listEntriesForSession(id) };
 }
 
 export async function finishSession(session, entries) {
   const completed = completeSessionDraft(session, entries);
-  const saved = await storage.saveSessionBundle(completed, entries, { sessionRevision: session.revision, entryRevisions: Object.fromEntries(entries.map((entry) => [entry.id, entry.revision])) });
-  await storage.putSetting("activeSessionId", null);
+  const saved = await storage.saveSessionBundle(completed, entries, { sessionRevision: session.revision, entryRevisions: Object.fromEntries(entries.map((entry) => [entry.id, entry.revision])),
+    settings: [{ key: "activeSessionId", value: null }] });
   return saved;
 }

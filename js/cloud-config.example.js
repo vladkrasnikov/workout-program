@@ -5,7 +5,6 @@ export default Object.freeze({
   supabaseUrl: "",
   supabasePublishableKey: "",
   supabaseClientUrl: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/+esm",
-  table: "workout_snapshots",
   emailRedirectTo: "",
   passwordResetRedirectTo: "",
 });

@@ -11,7 +11,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/styles.css">
-  <meta name="workout-app-build" content="v8">
+  <meta name="workout-app-build" content="v9">
   <script>
     (() => {
       const build = document.querySelector('meta[name="workout-app-build"]').content;
@@ -259,7 +259,8 @@
         <div id="account-tools" class="account-tools" hidden>
           <button id="import-legacy-data" class="action-btn action-secondary" type="button" hidden>Імпортувати старі локальні дані</button>
           <div id="sync-conflict-actions" class="account-actions" hidden>
-            <span>Є конфлікт локальної та хмарної історії.</span>
+            <span>Ці записи змінено на двох пристроях. Вибір стосується лише них.</span>
+            <span id="sync-conflict-details"></span>
             <button id="sync-use-local" class="action-btn action-secondary" type="button">Використати локальну</button>
             <button id="sync-use-cloud" class="action-btn action-secondary" type="button">Використати хмарну</button>
           </div>

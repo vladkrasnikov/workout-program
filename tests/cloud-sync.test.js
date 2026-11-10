@@ -1,310 +1,338 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  applyScopeTransfer,
-  CloudRevisionConflictError,
-  createCloudSync,
-  createMemorySyncMetaStore,
-  createSupabaseSnapshotStore,
-  getLegacyImportMarker,
-  LEGACY_IMPORT_MARKER_KEY,
-  normalizeSnapshot,
-  prepareGuestTransfer,
-} from "../js/cloud-sync.js";
+import "fake-indexeddb/auto";
+import { randomUUID } from "node:crypto";
+import { createCloudSync, createSupabaseRecordStore, getLegacyImportMarker, prepareGuestTransfer, applyScopeTransfer } from "../js/cloud-sync.js";
+import { createScopedRecordStore, setStorageScope, putSession, putEntry, saveSessionBundle, deleteSession, putSetting, exportAllData, importDataAtomic, openDatabase, databaseNameForScope } from "../js/storage.js";
+import { canonical, clone, normalizeSnapshot, recordKey, snapshotRecords } from "../js/sync-records.js";
+import { getActiveSession } from "../js/workouts.js";
+
+const legacyStorage = new Map();
+globalThis.localStorage = { getItem: (key) => legacyStorage.get(key) ?? null, removeItem: (key) => legacyStorage.delete(key) };
 
 const empty = () => ({ sessions: [], entries: [], settings: [] });
-const snapshot = (...ids) => ({ sessions: ids.map((id) => ({ id })), entries: [], settings: [] });
-const copy = (value) => JSON.parse(JSON.stringify(value));
-
-const memoryLocal = (initial) => {
-  let value = normalizeSnapshot(initial);
-  let replacements = 0;
-  return {
-    read: async () => copy(value),
-    replace: async (next) => { value = normalizeSnapshot(next); replacements += 1; },
-    set: (next) => { value = normalizeSnapshot(next); },
-    value: () => copy(value),
-    replacements: () => replacements,
-  };
+const session = (id, label = id) => ({ id, programId: "spine-safe", dayId: "a", status: "completed", workoutDate: "2026-11-09",
+  performedAt: "2026-11-09T12:00:00.000Z", createdAt: "2026-11-09T12:00:00.000Z", completedAt: "2026-11-09T13:00:00.000Z",
+  updatedAt: "2026-11-09T13:00:00.000Z", revision: 1, label });
+const snapshot = (...ids) => ({ ...empty(), sessions: ids.map((id) => session(id)) });
+const local = () => createScopedRecordStore(randomUUID());
+const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+const save = async (store, id, label) => {
+  setStorageScope(store.scope);
+  const old = (await store.exportSnapshot()).sessions.find((row) => row.id === id);
+  return putSession({ ...session(id, label), ...old, label: label ?? old?.label ?? id });
 };
+const ids = async (store) => (await store.exportSnapshot()).sessions.map(({ id }) => id).sort();
 
-const memoryRemote = (initial = null) => {
-  let value = initial ? copy(initial) : null;
-  let writes = 0;
+function remote(initial = empty()) {
+  const rows = new Map(snapshotRecords(initial).map((row) => [recordKey(row.kind, row.id), {
+    kind: row.kind, id: row.id, payload: row.payload, format_version: 1, revision: 1, updated_at: "t1", deleted_at: null,
+  }]));
+  const receipts = new Map();
+  const reads = [];
+  const operations = [];
   return {
-    read: async () => copy(value),
-    create: async (next) => {
-      if (value) throw new Error("already exists");
-      value = { snapshot: normalizeSnapshot(next), revision: 1, updatedAt: "t1" };
-      writes += 1;
-      return copy(value);
+    rows, reads, operations,
+    async changes(versions, keys = null) {
+      const changed = [...rows.values()].filter((row) => row.revision > (versions[recordKey(row.kind, row.id)] ?? 0)
+        && (!keys || keys.includes(recordKey(row.kind, row.id))));
+      reads.push(changed.map((row) => recordKey(row.kind, row.id)));
+      return clone(changed);
     },
-    update: async (next, expected) => {
-      if (!value || value.revision !== expected) throw new Error("revision conflict");
-      value = { snapshot: normalizeSnapshot(next), revision: expected + 1, updatedAt: `t${expected + 1}` };
-      writes += 1;
-      return copy(value);
+    async write(op) {
+      operations.push(clone(op));
+      if (receipts.has(op.operation_id)) return clone(receipts.get(op.operation_id));
+      const key = recordKey(op.kind, op.id);
+      const current = rows.get(key);
+      if ((current?.revision ?? 0) !== op.expected_revision) return { status: "conflict", record: clone(current) };
+      const revision = op.expected_revision + 1;
+      rows.set(key, { kind: op.kind, id: op.id, payload: op.deleted ? {} : clone(op.payload), format_version: 1,
+        revision, updated_at: `t${revision}`, deleted_at: op.deleted ? "deleted" : null });
+      const accepted = { status: "applied", revision };
+      receipts.set(op.operation_id, accepted);
+      return clone(accepted);
     },
-    external: (next) => { value = { snapshot: normalizeSnapshot(next), revision: (value?.revision ?? 0) + 1, updatedAt: "external" }; },
-    value: () => copy(value),
-    writes: () => writes,
+    external(id, label) {
+      const key = recordKey("session", id), row = rows.get(key);
+      rows.set(key, { ...row, payload: { session: session(id, label), entries: [] }, revision: row.revision + 1 });
+    },
   };
-};
+}
 
-test("initial local data is pushed and later deletion is not resurrected", async () => {
-  const local = memoryLocal(snapshot("s1"));
-  const remote = memoryRemote();
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
+async function seedCache(store, data) {
+  const db = await openDatabase(store.scope);
+  const tx = db.transaction(["sessions", "entries", "settings"], "readwrite");
+  for (const [name, field] of [["sessions", "id"], ["entries", "id"], ["settings", "key"]]) {
+    for (const value of data[name]) { assert.ok(value[field]); tx.objectStore(name).put(value); }
+  }
+  await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+  db.close();
+}
 
-  assert.equal((await sync.sync()).status, "pushed");
-  local.set(empty());
-  const result = await sync.sync();
-  assert.equal(result.status, "pushed");
-  assert.equal(result.revision, 2);
-  assert.deepEqual(remote.value().snapshot.sessions, []);
-});
-
-test("remote-only change pulls when local is unchanged", async () => {
-  const local = memoryLocal(snapshot("s1"));
-  const remote = memoryRemote();
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
-  await sync.sync();
-  remote.external(snapshot("s1", "s2"));
-
-  const result = await sync.sync();
+test("clean old account cache is replaced from cloud without uploading stale records", async () => {
+  const store = local(), cloud = remote(snapshot("cloud"));
+  await seedCache(store, snapshot("stale-cache"));
+  const result = await createCloudSync({ local: store, remote: cloud }).initializeFromCloud();
   assert.equal(result.status, "pulled");
-  assert.deepEqual(local.value().sessions.map(({ id }) => id), ["s1", "s2"]);
+  assert.deepEqual(await ids(store), ["cloud"]);
+  assert.equal(cloud.operations.length, 0);
 });
 
-test("concurrent changes return an explicit conflict without overwriting either side", async () => {
-  const local = memoryLocal(snapshot("s1"));
-  const remote = memoryRemote();
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
+test("local mutations enqueue atomically and survive a new sync instance without markPending", async () => {
+  const store = local(), cloud = remote();
+  await save(store, "session-offline");
+  assert.equal(await createCloudSync({ local: store, remote: cloud, isOnline: () => false }).hasPending(), true);
+  const sync = createCloudSync({ local: createScopedRecordStore(store.scope), remote: cloud });
   await sync.sync();
-  local.set(snapshot("s1", "local"));
-  remote.external(snapshot("s1", "remote"));
-  const beforeWrites = remote.writes();
-  const beforeReplacements = local.replacements();
-
-  const result = await sync.sync();
-  assert.equal(result.status, "conflict");
-  assert.equal(result.reason, "both-changed");
-  assert.equal(remote.writes(), beforeWrites);
-  assert.equal(local.replacements(), beforeReplacements);
+  assert.equal(cloud.rows.get("session:session-offline").revision, 1);
+  assert.equal(await sync.hasPending(), false);
 });
 
-test("explicit conflict resolution supports cloud or local choice", async () => {
-  const local = memoryLocal({ sessions: [{ id: "same", source: "local" }], entries: [], settings: [] });
-  const remote = memoryRemote({ snapshot: { sessions: [{ id: "same", source: "remote" }], entries: [], settings: [] }, revision: 4, updatedAt: "t4" });
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
+test("remote pull cannot overwrite a local change saved while the network request is pending", async () => {
+  const store = local(), cloud = remote(snapshot("same"));
+  const sync = createCloudSync({ local: store, remote: cloud });
+  await sync.sync();
+  cloud.external("same", "remote");
+  const entered = deferred(), release = deferred();
+  const read = cloud.changes;
+  cloud.changes = async (...args) => { const rows = await read(...args); entered.resolve(); await release.promise; return rows; };
+  const running = sync.sync();
+  await entered.promise;
+  await save(store, "same", "new-local-edit");
+  release.resolve();
+  const result = await running;
+  assert.equal(result.status, "conflict");
+  assert.equal((await store.exportSnapshot()).sessions[0].label, "new-local-edit");
+  assert.equal(await sync.hasPending(), true);
+});
 
+test("different workouts edited on two devices synchronize without an account-wide conflict", async () => {
+  const a = local(), b = local(), cloud = remote(snapshot("monday", "friday"));
+  const sa = createCloudSync({ local: a, remote: cloud }), sb = createCloudSync({ local: b, remote: cloud });
+  await sa.sync(); await sb.sync();
+  await save(a, "monday", "phone"); await save(b, "friday", "laptop");
+  assert.notEqual((await sa.sync()).status, "conflict");
+  assert.notEqual((await sb.sync()).status, "conflict");
+  await sa.sync();
+  assert.deepEqual((await a.exportSnapshot()).sessions.map(({ id, label }) => [id, label]).sort(), [["friday", "laptop"], ["monday", "phone"]]);
+  assert.equal(cloud.rows.get("session:monday").revision, 2);
+  assert.equal(cloud.rows.get("session:friday").revision, 2);
+  assert.ok(cloud.reads.some((keys) => keys.length === 1 && keys[0] === "session:monday"));
+});
+
+test("same-workout conflict resolution preserves unrelated workouts and detects a newer unseen cloud revision", async () => {
+  const store = local(), cloud = remote(snapshot("same", "other"));
+  const sync = createCloudSync({ local: store, remote: cloud });
+  await sync.sync();
+  await save(store, "same", "local"); await save(store, "other", "independent");
+  cloud.external("same", "remote");
   const conflict = await sync.sync();
   assert.equal(conflict.status, "conflict");
-  assert.equal((await sync.resolveConflict("cloud", conflict)).status, "pulled");
-  assert.deepEqual(local.value().sessions, [{ id: "same", source: "remote" }]);
-
-  local.set(snapshot("chosen-local"));
-  remote.external(snapshot("changed-cloud"));
-  const nextConflict = await sync.sync();
-  assert.equal(nextConflict.status, "conflict");
-  const localResult = await sync.resolveConflict("local", nextConflict);
-  assert.equal(localResult.status, "pushed");
-  assert.deepEqual(remote.value().snapshot.sessions.map(({ id }) => id), ["chosen-local"]);
-});
-
-test("local conflict resolution cannot overwrite a newer unseen cloud revision", async () => {
-  const local = memoryLocal({ sessions: [{ id: "same", source: "local" }], entries: [], settings: [] });
-  const remote = memoryRemote({ snapshot: { sessions: [{ id: "same", source: "cloud" }], entries: [], settings: [] }, revision: 4, updatedAt: "t4" });
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
-  const displayedConflict = await sync.sync();
-  assert.equal(displayedConflict.status, "conflict");
-  assert.equal(displayedConflict.remote.revision, 4);
-
-  remote.external({ sessions: [{ id: "same", source: "newer-cloud" }], entries: [], settings: [] });
-  const writesBeforeResolution = remote.writes();
-  const resolution = await sync.resolveConflict("local", displayedConflict);
-
-  assert.equal(resolution.status, "conflict");
-  assert.equal(resolution.reason, "remote-changed-after-conflict");
-  assert.equal(resolution.remote.revision, 5);
-  assert.equal(remote.writes(), writesBeforeResolution);
-  assert.deepEqual(remote.value().snapshot.sessions, [{ id: "same", source: "newer-cloud" }]);
-});
-
-test("offline sync keeps local data untouched", async () => {
-  const local = memoryLocal(snapshot("s1"));
-  const remote = memoryRemote();
-  const result = await createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => false }).sync();
-  assert.equal(result.status, "offline");
-  assert.equal(remote.writes(), 0);
-  assert.deepEqual(local.value().sessions.map(({ id }) => id), ["s1"]);
-});
-
-test("account initialization treats cloud as authoritative and never uploads stale scoped cache", async () => {
-  const local = memoryLocal(snapshot("stale-local"));
-  const remote = memoryRemote({ snapshot: snapshot("cloud"), revision: 7, updatedAt: "t7" });
-  const sync = createCloudSync({
-    remote,
-    local,
-    meta: createMemorySyncMetaStore(),
-    isOnline: () => true,
-    remoteAuthoritativeOnFirstSync: true,
-  });
-
-  const result = await sync.initializeFromCloud();
-  assert.equal(result.status, "pulled");
-  assert.deepEqual(local.value().sessions.map(({ id }) => id), ["cloud"]);
-  assert.equal(remote.writes(), 0);
-});
-
-test("empty cloud account initializes empty instead of uploading anonymous-looking cache", async () => {
-  const local = memoryLocal(snapshot("must-not-upload"));
-  const remote = memoryRemote();
-  const sync = createCloudSync({
-    remote,
-    local,
-    meta: createMemorySyncMetaStore(),
-    isOnline: () => true,
-    remoteAuthoritativeOnFirstSync: true,
-  });
-
-  const result = await sync.initializeFromCloud();
-  assert.equal(result.status, "initialized-empty");
-  assert.deepEqual(local.value(), normalizeSnapshot(empty()));
-  assert.deepEqual(remote.value().snapshot, normalizeSnapshot(empty()));
-});
-
-test("pending per-account changes survive reconnect and clear only after cloud persistence", async () => {
-  let online = false;
-  const local = memoryLocal(snapshot("cached"));
-  const remote = memoryRemote({ snapshot: snapshot("cached"), revision: 3, updatedAt: "t3" });
-  const meta = createMemorySyncMetaStore({
-    revision: 3,
-    fingerprint: JSON.stringify(normalizeSnapshot(snapshot("cached"))),
-    pending: false,
-  });
-  const sync = createCloudSync({ remote, local, meta, isOnline: () => online, remoteAuthoritativeOnFirstSync: true });
-
-  local.set(snapshot("cached", "offline-edit"));
-  await sync.markPending();
-  assert.equal(await sync.hasPending(), true);
-  assert.equal((await sync.sync()).status, "offline");
-  assert.equal(await sync.hasPending(), true);
-
-  online = true;
-  assert.equal((await sync.sync()).status, "pushed");
-  assert.equal(await sync.hasPending(), false);
-  assert.deepEqual(remote.value().snapshot.sessions.map(({ id }) => id), ["cached", "offline-edit"]);
-});
-
-test("a mutation made during an in-flight upload remains pending for the next revision", async () => {
-  const local = memoryLocal(snapshot("base"));
-  const remote = memoryRemote();
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
-  await sync.sync();
-
-  const originalUpdate = remote.update;
-  let releaseUpload;
-  let reportStarted;
-  const uploadStarted = new Promise((resolve) => { reportStarted = resolve; });
-  const uploadGate = new Promise((resolve) => { releaseUpload = resolve; });
-  remote.update = async (...args) => {
-    reportStarted();
-    await uploadGate;
-    return originalUpdate(...args);
-  };
-
-  local.set(snapshot("base", "first-edit"));
-  await sync.markPending();
-  const firstUpload = sync.sync();
-  await uploadStarted;
-  local.set(snapshot("base", "first-edit", "second-edit"));
-  await sync.markPending();
-  releaseUpload();
-  await firstUpload;
-
-  assert.equal(await sync.hasPending(), true);
-  assert.deepEqual(remote.value().snapshot.sessions.map(({ id }) => id), ["base", "first-edit"]);
-  await sync.sync();
-  assert.equal(await sync.hasPending(), false);
-  assert.deepEqual(remote.value().snapshot.sessions.map(({ id }) => id), ["base", "first-edit", "second-edit"]);
-});
-
-test("explicit legacy import persists marker atomically and cannot double-import", async () => {
-  const local = memoryLocal(empty());
-  const remote = memoryRemote({ snapshot: snapshot("account"), revision: 4, updatedAt: "t4" });
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
-  const legacy = snapshot("legacy");
-
-  await assert.rejects(() => sync.importLegacy(legacy), /явного підтвердження/);
-  const imported = await sync.importLegacy(legacy, { confirmed: true });
-  assert.equal(imported.status, "imported");
-  assert.deepEqual(imported.snapshot.sessions.map(({ id }) => id).sort(), ["account", "legacy"]);
-  assert.equal(getLegacyImportMarker(imported.snapshot).version, 1);
-  assert.ok(imported.snapshot.settings.some(({ key }) => key === LEGACY_IMPORT_MARKER_KEY));
-  const writesAfterFirstImport = remote.writes();
-
-  const second = await sync.importLegacy(legacy, { confirmed: true });
-  assert.equal(second.status, "already-imported");
-  assert.equal(remote.writes(), writesAfterFirstImport);
-  assert.deepEqual(remote.value().snapshot.sessions.map(({ id }) => id).sort(), ["account", "legacy"]);
-});
-
-test("failed legacy cloud write does not replace cache or create a local migration marker", async () => {
-  const local = memoryLocal(snapshot("account"));
-  const remote = memoryRemote({ snapshot: snapshot("account"), revision: 2, updatedAt: "t2" });
-  remote.update = async () => { throw new Error("network failed"); };
-  const sync = createCloudSync({ remote, local, meta: createMemorySyncMetaStore(), isOnline: () => true });
-
-  await assert.rejects(() => sync.importLegacy(snapshot("legacy"), { confirmed: true }), /network failed/);
-  assert.deepEqual(local.value().sessions.map(({ id }) => id), ["account"]);
-  assert.equal(getLegacyImportMarker(local.value()), null);
-});
-
-test("Supabase snapshot adapter applies user and revision filters", async () => {
-  const calls = [];
-  let mode = "read";
-  const row = { user_id: "11111111-1111-4111-8111-111111111111", snapshot: snapshot("s1"), revision: 8, updated_at: "t8" };
-  const builder = {
-    select(columns) { calls.push(["select", columns]); return this; },
-    eq(column, value) { calls.push(["eq", column, value]); return this; },
-    insert(value) { mode = "insert"; calls.push(["insert", value]); return this; },
-    update(value) { mode = "update"; calls.push(["update", value]); return this; },
-    async single() { return { data: { ...row, revision: 1 }, error: null }; },
-    async maybeSingle() { return { data: mode === "update" ? { ...row, revision: 8 } : row, error: null }; },
-  };
-  const store = createSupabaseSnapshotStore({ from: (table) => { calls.push(["from", table]); return builder; } }, { userId: row.user_id });
-
-  assert.equal((await store.read()).revision, 8);
-  await store.create(snapshot("s1"));
-  await store.update(snapshot("s2"), 7);
-  assert.ok(calls.some((call) => call[0] === "eq" && call[1] === "user_id" && call[2] === row.user_id));
-  assert.ok(calls.some((call) => call[0] === "eq" && call[1] === "revision" && call[2] === 7));
-  assert.ok(calls.some((call) => call[0] === "update" && call[1].revision === 8));
-});
-
-test("Supabase snapshot adapter reports a lost optimistic update", async () => {
-  const builder = {
-    update() { return this; }, eq() { return this; }, select() { return this; },
-    async maybeSingle() { return { data: null, error: null }; },
-  };
-  const store = createSupabaseSnapshotStore({ from: () => builder }, { userId: "11111111-1111-4111-8111-111111111111" });
-  await assert.rejects(() => store.update(empty(), 4), CloudRevisionConflictError);
-  assert.throws(() => createSupabaseSnapshotStore({ from() {} }, { userId: "guest" }), /UUID/);
-});
-
-test("guest transfer is a preview and reports stable-ID conflicts", () => {
-  const disjoint = prepareGuestTransfer(snapshot("guest"), snapshot("account"));
-  assert.equal(disjoint.conflicts.length, 0);
-  assert.deepEqual(disjoint.data.sessions.map(({ id }) => id).sort(), ["account", "guest"]);
-
-  const conflict = prepareGuestTransfer(snapshot("same"), { sessions: [{ id: "same", changed: true }], entries: [], settings: [] });
   assert.equal(conflict.conflicts.length, 1);
+  assert.equal(cloud.rows.get("session:other").payload.session.label, "independent");
+  cloud.external("same", "newer");
+  const newer = await sync.resolveConflict("local", conflict);
+  assert.equal(newer.status, "conflict");
+  assert.equal(cloud.rows.get("session:same").payload.session.label, "newer");
+  assert.notEqual((await sync.resolveConflict("local", newer)).status, "conflict");
+  assert.equal(cloud.rows.get("session:same").payload.session.label, "local");
+  assert.equal(cloud.rows.get("session:other").payload.session.label, "independent");
 });
 
-test("scope transfer cannot mutate data without explicit confirmation", async () => {
-  await assert.rejects(
-    () => applyScopeTransfer("11111111-1111-4111-8111-111111111111", { data: empty(), conflicts: [] }),
-    /явного підтвердження/,
-  );
+test("cloud conflict choice refuses to discard local edits made after the conflict was displayed", async () => {
+  const store = local(), cloud = remote(snapshot("same"));
+  const sync = createCloudSync({ local: store, remote: cloud }); await sync.sync();
+  await save(store, "same", "local"); cloud.external("same", "remote");
+  const conflict = await sync.sync();
+  await save(store, "same", "new-local");
+  const updated = await sync.resolveConflict("cloud", conflict);
+  assert.equal(updated.status, "conflict");
+  assert.equal((await store.exportSnapshot()).sessions[0].label, "new-local");
+  await sync.resolveConflict("cloud", updated);
+  assert.equal((await store.exportSnapshot()).sessions[0].label, "remote");
+});
+
+test("an edit made during upload remains queued and uses the acknowledged remote revision", async () => {
+  const store = local(), cloud = remote();
+  const sync = createCloudSync({ local: store, remote: cloud }); await sync.sync();
+  await save(store, "same", "first");
+  const entered = deferred(), release = deferred();
+  const write = cloud.write;
+  cloud.write = async (op) => { entered.resolve(); await release.promise; return write(op); };
+  const running = sync.sync(); await entered.promise;
+  await save(store, "same", "second"); release.resolve();
+  assert.equal((await running).status, "pending");
+  assert.equal((await store.exportSnapshot()).sessions[0].label, "second");
+  await sync.sync();
+  assert.equal(cloud.rows.get("session:same").revision, 2);
+  assert.equal(cloud.rows.get("session:same").payload.session.label, "second");
+});
+
+test("a lost response retries the same durable operation after restart, even after another cloud edit", async () => {
+  const store = local(), cloud = remote();
+  const sync = createCloudSync({ local: store, remote: cloud }); await sync.sync();
+  await save(store, "same", "first");
+  const write = cloud.write; let fail = true;
+  cloud.write = async (op) => { const result = await write(op); if (fail) { fail = false; throw new Error("connection lost"); } return result; };
+  await assert.rejects(sync.sync(), /connection lost/);
+  const operationId = cloud.operations[0].operation_id;
+  cloud.external("same", "another-device");
+  await createCloudSync({ local: createScopedRecordStore(store.scope), remote: cloud }).sync();
+  assert.equal(cloud.operations[1].operation_id, operationId);
+  assert.equal(cloud.rows.get("session:same").revision, 2);
+  assert.equal((await store.exportSnapshot()).sessions[0].label, "another-device");
+});
+
+test("two browser tabs share the prepared operation and cannot acknowledge away a newer generation", async () => {
+  const a = local(), b = createScopedRecordStore(a.scope);
+  await save(a, "same", "first"); await a.state();
+  const [one, two] = await Promise.all([a.prepare("session:same"), b.prepare("session:same")]);
+  assert.equal(one.operation_id, two.operation_id);
+  await save(b, "same", "second");
+  await a.acknowledge(one, { revision: 1 }); await b.acknowledge(two, { revision: 1 });
+  const next = await a.prepare("session:same");
+  assert.notEqual(next.operation_id, one.operation_id);
+  assert.equal(next.expected_revision, 1);
+  assert.equal(next.payload.session.label, "second");
+});
+
+test("tombstones remove a stale device copy and a stale offline edit cannot resurrect a deletion", async () => {
+  const a = local(), b = local(), cloud = remote(snapshot("same"));
+  const sa = createCloudSync({ local: a, remote: cloud }), sb = createCloudSync({ local: b, remote: cloud });
+  await sa.sync(); await sb.sync();
+  setStorageScope(a.scope); await deleteSession("same"); await sa.sync();
+  assert.ok(cloud.rows.get("session:same").deleted_at);
+  await save(b, "same", "offline-edit");
+  assert.equal((await sb.sync()).status, "conflict");
+  assert.ok(cloud.rows.get("session:same").deleted_at);
+  const conflict = await sb.sync(); await sb.resolveConflict("cloud", conflict);
+  assert.deepEqual(await ids(b), []);
+});
+
+test("clean devices apply remote deletion without a conflict", async () => {
+  const a = local(), b = local(), cloud = remote(snapshot("same"));
+  const sa = createCloudSync({ local: a, remote: cloud }), sb = createCloudSync({ local: b, remote: cloud });
+  await sa.sync(); await sb.sync(); setStorageScope(a.scope); await deleteSession("same"); await sa.sync();
+  await sb.sync(); assert.deepEqual(await ids(b), []);
+});
+
+test("a failed bundle transaction rolls back both data and its outbox generation", async () => {
+  const store = local(); setStorageScope(store.scope);
+  await assert.rejects(saveSessionBundle(session("s"), [{ id: "e", sessionId: "other" }]), /іншому/);
+  assert.deepEqual(await ids(store), []);
+  assert.deepEqual((await store.state()).pending, []);
+});
+
+test("entry changes queue the parent workout; active UI pointers stay on their device", async () => {
+  const store = local(), cloud = remote(); setStorageScope(store.scope);
+  await putSession(session("s"));
+  await putEntry({ id: "e", sessionId: "s", sets: [] });
+  await putSetting("activeSessionId", "s"); await putSetting("currentProgramId", "spine-safe");
+  const sync = createCloudSync({ local: store, remote: cloud }); await sync.sync();
+  assert.equal(cloud.rows.size, 1);
+  assert.equal(cloud.rows.get("session:s").payload.entries.length, 1);
+  assert.equal((await store.exportSnapshot()).settings.find(({ key }) => key === "activeSessionId").value, "s");
+});
+
+test("an open clean draft is not replaced while its editor may contain unpersisted input", async () => {
+  const store = local(), data = snapshot("same"); data.sessions[0].status = "draft";
+  const cloud = remote(data), sync = createCloudSync({ local: store, remote: cloud });
+  await sync.sync(); setStorageScope(store.scope);
+  await putSetting("activeSessionId", "same");
+  cloud.external("same", "finished-on-another-device");
+  const conflict = await sync.sync();
+  assert.equal(conflict.status, "conflict");
+  assert.equal((await store.exportSnapshot()).sessions[0].status, "draft");
+  await sync.resolveConflict("cloud", conflict);
+  assert.equal((await store.exportSnapshot()).sessions[0].status, "completed");
+  assert.equal((await store.exportSnapshot()).settings.find(({ key }) => key === "activeSessionId").value, null);
+});
+
+test("a draft pulled onto a new device can be resumed without a synchronized active pointer", async () => {
+  const store = local(), data = snapshot("draft"); data.sessions[0].status = "draft";
+  await createCloudSync({ local: store, remote: remote(data) }).sync();
+  setStorageScope(store.scope);
+  assert.equal((await getActiveSession()).session.id, "draft");
+});
+
+test("explicit legacy import uses a short digest, persists its outbox and is idempotent", async () => {
+  const store = local(), cloud = remote(snapshot("account"));
+  const sync = createCloudSync({ local: store, remote: cloud });
+  await assert.rejects(sync.importLegacy(snapshot("guest")), /підтвердження/);
+  const result = await sync.importLegacy(snapshot("guest"), { confirmed: true });
+  assert.equal(result.status, "imported");
+  const marker = getLegacyImportMarker(await store.exportSnapshot());
+  assert.equal(marker.digest.length, 64); assert.equal(marker.fingerprint, undefined);
+  const writes = cloud.operations.length;
+  assert.equal((await sync.importLegacy(snapshot("guest"), { confirmed: true })).status, "already-imported");
+  assert.equal(cloud.operations.length, writes);
+  assert.deepEqual(await ids(store), ["account", "guest"]);
+});
+
+test("legacy pending deletion survives bootstrap and keeps unrelated remote workouts", async () => {
+  const store = local(), cloud = remote(snapshot("deleted", "other"));
+  const key = `workout-program:cloud-sync:${store.scope}`;
+  legacyStorage.set(key, JSON.stringify({ pending: true, revision: 1, fingerprint: canonical(normalizeSnapshot(snapshot("deleted"))) }));
+    await createCloudSync({ local: store, remote: cloud }).sync();
+    assert.ok(cloud.rows.get("session:deleted").deleted_at);
+    assert.deepEqual(await ids(store), ["other"]);
+    assert.equal(legacyStorage.has(key), false);
+});
+
+test("v2 changes survive the crash window even when legacy pending is false", async () => {
+  const store = local(), base = snapshot("same"), changed = snapshot("same");
+  changed.sessions[0].label = "saved-before-crash";
+  await seedCache(store, changed);
+  legacyStorage.set(`workout-program:cloud-sync:${store.scope}`, JSON.stringify({ pending: false, revision: 1, fingerprint: canonical(base) }));
+  const cloud = remote(base);
+  await createCloudSync({ local: store, remote: cloud }).sync();
+  assert.equal(cloud.rows.get("session:same").payload.session.label, "saved-before-crash");
+});
+
+test("legacy deletion already missing from the old cloud snapshot is acknowledged safely", async () => {
+  const store = local(), cloud = remote();
+  legacyStorage.set(`workout-program:cloud-sync:${store.scope}`, JSON.stringify({ pending: false, revision: 7, fingerprint: canonical(snapshot("deleted")) }));
+  const sync = createCloudSync({ local: store, remote: cloud });
+  assert.notEqual((await sync.sync()).status, "conflict");
+  assert.equal(await sync.hasPending(), false);
+  assert.deepEqual(await ids(store), []);
+});
+
+test("a legacy offline edit of an absent cloud workout requires an explicit restore choice", async () => {
+  for (const choice of ["local", "cloud"]) {
+    const store = local(), changed = snapshot("deleted"), cloud = remote();
+    changed.sessions[0].label = "offline-edit";
+    await seedCache(store, changed);
+    legacyStorage.set(`workout-program:cloud-sync:${store.scope}`, JSON.stringify({ pending: true, revision: 7, fingerprint: canonical(snapshot("deleted")) }));
+    const sync = createCloudSync({ local: store, remote: cloud });
+    const conflict = await sync.sync();
+    assert.equal(conflict.status, "conflict");
+    assert.equal(conflict.conflicts[0].remote.missing, true);
+    await sync.resolveConflict(choice, conflict);
+    assert.deepEqual(await ids(store), choice === "local" ? ["deleted"] : []);
+    assert.equal(cloud.rows.size, choice === "local" ? 1 : 0);
+  }
+});
+
+test("RPC binds the authenticated account to the local queue and never sends local generations", async () => {
+  const calls = [];
+  const owner = randomUUID();
+  const remote = createSupabaseRecordStore({ rpc: async (name, args) => { calls.push([name, args]); return { data: name === "workout_get_changes" ? [] : { status: "applied", revision: 1 } }; } }, { userId: owner });
+  await remote.changes({ "session:s": 1 });
+  await remote.write({ kind: "session", id: "s", operation_id: randomUUID(), generation: 5, expected_revision: 0, format_version: 1, payload: {}, deleted: false });
+  assert.equal(calls[0][0], "workout_get_changes");
+  assert.equal(calls[1][0], "workout_apply_change");
+  assert.equal(calls[1][1].p_generation, undefined);
+  assert.equal(calls[1][1].p_user_id, undefined);
+  assert.equal(calls[0][1].p_expected_user_id, owner);
+  assert.equal(calls[1][1].p_expected_user_id, owner);
+  assert.throws(() => createSupabaseRecordStore({ rpc() {} }, { userId: "guest" }), /UUID/);
+});
+
+test("guest transfer remains explicit and stable-ID conflicts are reported", async () => {
+  const plan = prepareGuestTransfer(snapshot("guest"), snapshot("account"));
+  assert.equal(plan.conflicts.length, 0);
+  assert.equal(plan.data.sessions.length, 2);
+  assert.ok(prepareGuestTransfer(snapshot("same"), { ...snapshot("same"), sessions: [session("same", "changed")] }).conflicts.length);
+  await assert.rejects(applyScopeTransfer(randomUUID(), plan), /підтвердження/);
 });

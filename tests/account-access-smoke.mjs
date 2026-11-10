@@ -292,33 +292,45 @@ try {
           resetPasswordForEmail: async () => ({ error: null }),
           updateUser: async () => ({ data: { user: state.session?.user ?? null }, error: null }),
         },
-        from() {
-          const query = { operation: 'read', payload: null, filters: {} };
-          const builder = {
-            select() { return builder; },
-            eq(column, value) { query.filters[column] = value; return builder; },
-            insert(payload) { query.operation = 'insert'; query.payload = payload; return builder; },
-            update(payload) { query.operation = 'update'; query.payload = payload; return builder; },
-            async maybeSingle() {
-              const current = state.rows.get(query.filters.user_id) ?? null;
-              if (query.operation === 'update') {
-                if (!current || current.revision !== query.filters.revision) return { data: null, error: null };
-                const next = { ...current, ...query.payload, updated_at: 'mock-' + query.payload.revision };
-                state.rows.set(query.filters.user_id, next);
-                state.writes += 1;
-                return { data: next, error: null };
-              }
-              return { data: current, error: null };
-            },
-            async single() {
-              if (query.operation !== 'insert') return { data: null, error: new Error('Unexpected mock single') };
-              const row = { ...query.payload, snapshot: query.payload.snapshot ?? empty(), updated_at: 'mock-' + query.payload.revision };
-              state.rows.set(row.user_id, row);
-              state.writes += 1;
-              return { data: row, error: null };
-            },
-          };
-          return builder;
+        async rpc(name, args) {
+          const owner = state.session?.user?.id;
+          if (!owner) return { error: new Error('Authentication required') };
+          if (owner !== args.p_expected_user_id) return { error: new Error('Account changed') };
+          state.records ??= new Map(); state.receipts ??= new Map(); state.migrated ??= new Set();
+          if (!state.migrated.has(owner)) {
+            const old = state.rows.get(owner) ?? { snapshot: empty(), revision: 1 };
+            for (const session of old.snapshot.sessions) state.records.set(owner + ':session:' + session.id, {
+              kind: 'session', id: session.id, payload: { session, entries: old.snapshot.entries.filter(e => e.sessionId === session.id) },
+              revision: old.revision, format_version: 1, deleted_at: null,
+            });
+            for (const setting of old.snapshot.settings.filter(s => !['activeSessionId','currentProgramId'].includes(s.key))) state.records.set(owner + ':setting:' + setting.key, {
+              kind: 'setting', id: setting.key, payload: setting, revision: old.revision, format_version: 1, deleted_at: null,
+            });
+            state.rows.set(owner, old); state.migrated.add(owner);
+          }
+          const records = () => [...state.records.entries()].filter(([key]) => key.startsWith(owner + ':')).map(([,row]) => row);
+          if (name === 'workout_get_changes') return { data: structuredClone(records().filter(row =>
+            row.revision > (args.p_versions[row.kind + ':' + row.id] ?? 0)
+            && (!args.p_keys || args.p_keys.includes(row.kind + ':' + row.id)))) };
+          if (name !== 'workout_apply_change') return { error: new Error('Unknown RPC') };
+          const receiptKey = owner + ':' + args.p_operation_id;
+          if (state.receipts.has(receiptKey)) return { data: state.receipts.get(receiptKey) };
+          const key = owner + ':' + args.p_kind + ':' + args.p_id;
+          const current = state.records.get(key);
+          if ((current?.revision ?? 0) !== args.p_expected_revision) return { data: { status: 'conflict', record: structuredClone(current) } };
+          const revision = args.p_expected_revision + 1;
+          state.records.set(key, { kind: args.p_kind, id: args.p_id, payload: structuredClone(args.p_payload),
+            revision, format_version: 1, deleted_at: args.p_deleted ? 'deleted' : null });
+          const visible = records().filter(row => !row.deleted_at);
+          state.rows.set(owner, { snapshot: {
+            sessions: visible.filter(row => row.kind === 'session').map(row => row.payload.session),
+            entries: visible.filter(row => row.kind === 'session').flatMap(row => row.payload.entries),
+            settings: visible.filter(row => row.kind === 'setting').map(row => row.payload),
+          }, revision });
+          state.writes += 1;
+          const result = { status: 'applied', revision };
+          state.receipts.set(receiptKey, result);
+          return { data: result };
         },
       };
       window.__mockAccountCloud = state;

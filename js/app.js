@@ -16,8 +16,8 @@ import {
 import cloudConfig from "./cloud-config.js";
 import { createSupabaseAuth, isCloudConfigured } from "./auth.js";
 import {
-  LEGACY_IMPORT_MARKER_KEY, createBrowserSyncMetaStore, createCloudSync,
-  createScopedLocalSnapshotStore, createSupabaseSnapshotStore,
+  LEGACY_IMPORT_MARKER_KEY, createCloudSync,
+  createScopedRecordStore, createSupabaseRecordStore,
 } from "./cloud-sync.js";
 
 const CLOUD_SCOPE_HINT_KEY = "workout-program:account-scope";
@@ -52,6 +52,7 @@ const state = {
     switching: false,
     offlineIdentity: false,
     accessReady: false,
+    retryDelay: 2000,
   },
 };
 
@@ -132,21 +133,19 @@ function resetInMemoryWorkoutState() {
 function makeSyncFor(userId) {
   if (!state.cloud.auth?.client) return null;
   return createCloudSync({
-    remote: createSupabaseSnapshotStore(state.cloud.auth.client, { userId, table: state.cloud.config.table }),
-    local: createScopedLocalSnapshotStore(userId),
-    meta: createBrowserSyncMetaStore(userId),
-    remoteAuthoritativeOnFirstSync: true,
+    remote: createSupabaseRecordStore(state.cloud.auth.client, { userId }),
+    local: createScopedRecordStore(userId),
+    beforePull: async () => { if (state.cloud.user?.id === userId) await flushSaves(); },
   });
 }
 
 function makeOfflineSyncFor(userId) {
-  const meta = createBrowserSyncMetaStore(userId);
+  const local = createScopedRecordStore(userId);
   return Object.freeze({
     async markPending() {
-      await meta.set({ ...(await meta.get() ?? {}), pending: true, pendingAt: new Date().toISOString() });
       return { status: "pending" };
     },
-    async hasPending() { return Boolean((await meta.get())?.pending); },
+    async hasPending() { return (await local.state()).pending.length > 0; },
     async sync() { return { status: "offline" }; },
   });
 }
@@ -177,6 +176,15 @@ async function loadCurrentScope({ render = true } = {}) {
     renderJournal();
     renderHistory();
   }
+}
+
+async function refreshSyncedScope() {
+  const panels = [byId("tab-journal"), byId("tab-history")];
+  panels.forEach((panel) => { panel.inert = true; });
+  try {
+    await flushSaves();
+    await loadCurrentScope();
+  } finally { panels.forEach((panel) => { panel.inert = false; }); }
 }
 
 async function enterAnonymousMode({ message = "Увійдіть, щоб вести особистий журнал тренувань." } = {}) {
@@ -262,6 +270,11 @@ function renderAccount() {
   byId("local-mode-options").hidden = signedIn || state.localMode;
   setup.hidden = configured;
   conflict.hidden = !state.cloud.conflict;
+  byId("sync-conflict-details").textContent = state.cloud.conflict?.reason === "legacy-import"
+    ? "Імпорт містить записи з однаковими ID. Збережіть JSON-копії та усуньте дублікати."
+    : (state.cloud.conflict?.conflicts ?? []).map((item) => item.kind === "session"
+      ? `${item.local?.payload?.session?.workoutDate ?? item.remote?.payload?.session?.workoutDate ?? "Тренування"} · ${item.local?.payload?.session?.dayNameSnapshot ?? item.id}`
+      : "Налаштування імпорту").join("; ");
   if (ready) {
     byId("account-summary").textContent = `${state.cloud.user.email || "Акаунт"} · особиста історія синхронізується з Supabase`;
   } else if (signedIn) {
@@ -324,25 +337,35 @@ async function runCloudSync(reason = "зміни") {
       if (state.dirtyEntries.size) await flushSaves();
       const result = await sync.sync();
       if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return { ...result, stale: true };
+      state.cloud.retryDelay = 2000;
+      if (result.changed) await refreshSyncedScope();
       if (result.status === "conflict") {
         state.cloud.conflict = result;
         renderAccount();
-        setCloudStatus("Конфлікт: оберіть зміни цього пристрою або хмарну версію.", true);
+        setCloudStatus("Одне або кілька тренувань змінено на двох пристроях. Решта історії синхронізується незалежно.", true);
         setStatus("Конфлікт синхронізації", true);
       } else if (result.status === "offline") {
         setCloudStatus("Офлайн · очікує синхронізації.");
         setStatus("Збережено локально · очікує синхронізації");
+      } else if (result.status === "pending") {
+        setCloudStatus("Нові зміни збережено локально; очікують наступної синхронізації.");
+        setStatus("Збережено локально · очікує синхронізації");
+        scheduleCloudSync(reason);
       } else {
         state.cloud.conflict = null;
         setCloudStatus("Збережено у хмарі.");
         setStatus("Збережено у хмарі");
-        if (["pulled", "initialized-empty"].includes(result.status)) await loadCurrentScope();
         renderAccount();
       }
       return result;
     } catch (error) {
+      if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return { status: "stale" };
       setCloudStatus(`Помилка синхронізації: ${error.message}`, true);
       console.error(error);
+      if (navigator.onLine !== false) {
+        scheduleCloudSync("повтор після помилки", state.cloud.retryDelay);
+        state.cloud.retryDelay = Math.min(state.cloud.retryDelay * 2, 60000);
+      }
       return { status: "error", error };
     }
   });
@@ -371,14 +394,15 @@ async function markPendingAndSync(reason, { awaitCloud = false } = {}) {
   if (["error", "conflict"].includes(result.status)) {
     throw result.error ?? new Error("Не вдалося зберегти зміни у хмарі. Локальна копія очікує синхронізації.");
   }
+  if (result.status === "pending") throw new Error("Зміни збережено локально й очікують синхронізації.");
   return result;
 }
 
 let syncTimer = null;
-function scheduleCloudSync(reason = "редагування") {
+function scheduleCloudSync(reason = "редагування", delay = 700) {
   if (!hasAccount()) return;
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => void runCloudSync(reason), 700);
+  syncTimer = setTimeout(() => void runCloudSync(reason), delay);
 }
 
 async function resolveSyncConflict(strategy) {
@@ -386,9 +410,11 @@ async function resolveSyncConflict(strategy) {
   const sync = state.cloud.sync;
   const userId = state.cloud.user?.id;
   const conflict = state.cloud.conflict;
+  byId("tab-journal").inert = true;
   try {
     const result = await sync.resolveConflict(strategy, conflict);
     if (state.cloud.sync !== sync || state.cloud.user?.id !== userId) return;
+    if (result.status === "offline") throw result.error;
     if (result.status === "conflict") {
       state.cloud.conflict = result;
       renderAccount();
@@ -398,10 +424,11 @@ async function resolveSyncConflict(strategy) {
     state.cloud.conflict = null;
     await loadCurrentScope();
     renderAccount();
-    setCloudStatus(strategy === "local" ? "Локальну версію записано в хмару." : "Хмарну версію завантажено.");
+    setCloudStatus(result.pending ? "Зміни збережено локально; очікують синхронізації." : "Конфліктні тренування синхронізовано.");
+    if (result.pending) scheduleCloudSync("розв’язання конфлікту");
   } catch (error) {
-    setCloudStatus(error.message, true);
-  }
+    if (state.cloud.sync === sync && state.cloud.user?.id === userId) setCloudStatus(error.message, true);
+  } finally { byId("tab-journal").inert = false; }
 }
 
 async function applyAuthSession(session, event = "SESSION") {
@@ -1041,7 +1068,7 @@ async function completeWorkout() {
     await flushSaves();
     setStatus("Завершення…");
     await finishSession(state.active.session, state.active.entries);
-    state.active = null;
+    state.active = await getActiveSession();
     await refreshData();
     renderJournal();
     renderHistory();
@@ -1269,6 +1296,13 @@ async function importLegacyData() {
     }
     if (result.status === "conflict") {
       setCloudStatus(`Імпорт зупинено: ${result.conflicts.length} конфліктів. Старі дані не змінено.`, true);
+      return;
+    }
+    if (result.status === "pending") {
+      await loadCurrentScope();
+      await updateLegacyImportAvailability();
+      setCloudStatus("Імпорт збережено локально; очікує синхронізації.");
+      scheduleCloudSync("імпорт");
       return;
     }
     await loadCurrentScope();
